@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { NdjsonActionParser } from "@/lib/ndjson"
 import { useDrawRequest } from "@/hooks/useDrawRequest"
 import type { VoiceLayer } from "@/voice/types"
@@ -110,6 +110,12 @@ export function useTeachingSession(opts: {
     },
     [voice, runTurn],
   )
+
+  const askRef = useRef(ask)
+  askRef.current = ask
+  useEffect(() => {
+    voice?.onUserUtterance((t) => askRef.current(t))
+  }, [voice])
 
   return { start, steps, currentIndex, ask, status }
 }
