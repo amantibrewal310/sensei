@@ -6,7 +6,11 @@ import { PlanJsonSchema, parsePlan } from "@/lib/plan-schema"
 export const runtime = "nodejs"
 
 export async function POST(req: Request) {
-  const { topic } = await req.json().catch(() => ({ topic: "" }))
+  const body = await req.json().catch(() => null)
+  const topic =
+    body && typeof body === "object"
+      ? (body as { topic?: unknown }).topic
+      : undefined
   if (typeof topic !== "string" || !topic.trim()) {
     return NextResponse.json({ error: "topic required" }, { status: 400 })
   }
