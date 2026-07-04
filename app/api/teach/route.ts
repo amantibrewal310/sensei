@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server"
 import { anthropic, sseResponse } from "@/lib/anthropic"
 import { TEACHER_MODEL } from "@/lib/models"
 import { TEACHER_SYSTEM } from "@/lib/prompts"
@@ -12,7 +13,20 @@ interface Body {
 }
 
 export async function POST(req: Request) {
-  const { steps, currentIndex, transcript } = (await req.json()) as Body
+  const body = (await req.json().catch(() => null)) as Body | null
+  const steps = body?.steps
+  const currentIndex = body?.currentIndex
+  const transcript = body?.transcript ?? []
+  if (
+    !Array.isArray(steps) ||
+    typeof currentIndex !== "number" ||
+    !steps[currentIndex]
+  ) {
+    return NextResponse.json(
+      { error: "invalid teach request" },
+      { status: 400 },
+    )
+  }
   const current = steps[currentIndex]
   const upcoming = steps
     .slice(currentIndex + 1)
