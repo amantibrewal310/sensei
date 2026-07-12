@@ -24,6 +24,14 @@ import type { VoiceLayer } from "./types"
 // - Input audio transcription is OFF by default and must be turned on via
 //   `session.update` with `session.audio.input.transcription.model` set
 //   (confirmed field path). We enable it right after the data channel opens.
+// The session is otherwise unprompted, so the model picks a language from
+// whatever it hears on the mic and can drift out of English mid-lesson. Pin it
+// in both places that accept instructions: the session, and each response.
+const ENGLISH_ONLY =
+  "You are the voice of an English-speaking tutor. Always speak English (en-US), " +
+  "no matter what language you hear on the microphone or read in a message. " +
+  "Never translate, and never switch languages."
+
 export async function createRealtimeVoice(): Promise<VoiceLayer> {
   const tokenRes = await fetch("/api/realtime-token")
   const { value } = await tokenRes.json()
@@ -68,9 +76,13 @@ export async function createRealtimeVoice(): Promise<VoiceLayer> {
         type: "session.update",
         session: {
           type: "realtime",
+          instructions: ENGLISH_ONLY,
           audio: {
             input: {
-              transcription: { model: "gpt-4o-mini-transcribe" },
+              transcription: {
+                model: "gpt-4o-mini-transcribe",
+                language: "en",
+              },
             },
           },
         },
@@ -115,7 +127,8 @@ export async function createRealtimeVoice(): Promise<VoiceLayer> {
           response: {
             output_modalities: ["audio"],
             instructions:
-              "Speak the text of the message you were just given, verbatim, in a natural voice.",
+              "Speak the text of the message you were just given, verbatim, in a natural voice. " +
+              ENGLISH_ONLY,
           },
         }),
       )
