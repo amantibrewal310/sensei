@@ -23,18 +23,30 @@ describe("NdjsonActionParser", () => {
 
   it("flush parses a final unterminated line", () => {
     const p = new NdjsonActionParser()
-    p.push('{"type":"draw","instruction":"a box"}')
+    p.push('{"type":"draw","panel":"stack","what":"a box"}')
     expect(p.push("")).toEqual([])
     expect(p.flush()).toEqual([
-      { type: "draw", instruction: "a box" },
+      { type: "draw", panel: "stack", what: "a box" },
+    ])
+  })
+
+  it("parses a connector draw", () => {
+    const p = new NdjsonActionParser()
+    expect(p.push('{"type":"draw","connector":"loop"}\n')).toEqual([
+      { type: "draw", connector: "loop" },
     ])
   })
 
   it("skips malformed and unknown lines", () => {
     const p = new NdjsonActionParser()
     const out = p.push(
-      'not json\n{"type":"nope"}\n{"type":"plan","intent":"teach"}\n',
+      'not json\n{"type":"nope"}\n{"type":"speak","text":"ok"}\n',
     )
-    expect(out).toEqual([{ type: "plan", intent: "teach" }])
+    expect(out).toEqual([{ type: "speak", text: "ok" }])
+  })
+
+  it("rejects a draw that names neither a panel nor a connector", () => {
+    const p = new NdjsonActionParser()
+    expect(p.push('{"type":"draw","instruction":"freehand"}\n')).toEqual([])
   })
 })

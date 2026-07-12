@@ -4,18 +4,16 @@ function coerceAction(value: unknown): TeacherAction | null {
   if (!value || typeof value !== "object") return null
   const v = value as Record<string, unknown>
   switch (v.type) {
-    case "plan":
-      return typeof v.intent === "string"
-        ? { type: "plan", intent: v.intent }
-        : null
     case "speak":
-      return typeof v.text === "string"
-        ? { type: "speak", text: v.text }
-        : null
+      return typeof v.text === "string" ? { type: "speak", text: v.text } : null
     case "draw":
-      return typeof v.instruction === "string"
-        ? { type: "draw", instruction: v.instruction }
-        : null
+      if (typeof v.panel === "string" && typeof v.what === "string") {
+        return { type: "draw", panel: v.panel, what: v.what }
+      }
+      if (typeof v.connector === "string") {
+        return { type: "draw", connector: v.connector }
+      }
+      return null
     case "done":
       return { type: "done" }
     default:

@@ -1,32 +1,25 @@
 "use client"
 
 import { Suspense, useEffect, useRef, useState } from "react"
+import dynamic from "next/dynamic"
 import { useSearchParams } from "next/navigation"
-import { SvgCanvas } from "@/components/SvgCanvas"
 import { ProgressStrip } from "@/components/ProgressStrip"
 import { useTeachingSession } from "@/hooks/useTeachingSession"
-import { createRealtimeVoice } from "@/voice/realtime"
-import type { VoiceLayer } from "@/voice/types"
+import type { CanvasApi } from "@/components/Board"
 
-const START =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="100%" height="100%"></svg>'
+// tldraw is a browser-only canvas; rendering it on the server just throws.
+const Board = dynamic(() => import("@/components/Board").then((m) => m.Board), {
+  ssr: false,
+})
 
 function LearnInner() {
   const params = useSearchParams()
   const topic = params.get("topic") ?? ""
-  const [svg, setSvg] = useState(START)
-  const svgRef = useRef(svg)
-  svgRef.current = svg
-  const [voice, setVoice] = useState<VoiceLayer | null>(null)
-  const [ask, setAsk] = useState("")
+  const canvas = useRef<CanvasApi | null>(null)
   const startedRef = useRef(false)
 
-  const session = useTeachingSession({
-    voice,
-    getSvg: () => svgRef.current,
-    setSvg,
-    canvasWidth: 800,
-  })
+  const session = useTeachingSession(canvas)
+  const [ask, setAsk] = useState("")
 
   useEffect(() => {
     if (topic && !startedRef.current) {
@@ -36,27 +29,29 @@ function LearnInner() {
   }, [topic, session])
 
   return (
-    <div className="flex h-screen flex-col">
-      <div className="flex items-center justify-between border-b">
+    <div className="flex h-screen flex-col bg-neutral-50">
+      <div className="border-b bg-white">
         <ProgressStrip
           current={session.currentIndex}
           total={session.steps.length}
           label={session.steps[session.currentIndex]?.label}
         />
-        {!voice && (
-          <button
-            className="m-2 rounded border px-3 py-1 text-sm"
-            onClick={async () => setVoice(await createRealtimeVoice())}
-          >
-            Start voice
-          </button>
-        )}
       </div>
-      <div className="min-h-0 flex-1">
-        <SvgCanvas svg={svg} />
+
+      <div className="relative min-h-0 flex-1">
+        <Board api={canvas} />
       </div>
+
+      {/* Phase 1 stands in for the narration: you read the sentence that the
+          shape appearing beside it is answering. Phase 2 speaks this instead. */}
+      <div className="min-h-16 border-t bg-white px-6 py-4">
+        <p className="mx-auto max-w-3xl text-center text-lg leading-snug text-neutral-800">
+          {session.caption}
+        </p>
+      </div>
+
       <form
-        className="flex gap-2 border-t p-2"
+        className="flex gap-2 border-t bg-white p-3"
         onSubmit={(e) => {
           e.preventDefault()
           if (ask.trim()) {

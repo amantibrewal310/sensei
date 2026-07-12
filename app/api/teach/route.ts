@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { anthropic, sseResponse } from "@/lib/anthropic"
 import { TEACHER_MODEL } from "@/lib/models"
 import { TEACHER_SYSTEM } from "@/lib/prompts"
+import type { Layout } from "@/lib/layout"
 import type { Step } from "@/lib/types"
 
 export const runtime = "nodejs"
@@ -10,6 +11,7 @@ interface Body {
   steps: Step[]
   currentIndex: number
   transcript: { role: "user" | "assistant"; text: string }[]
+  board: Layout
 }
 
 export async function POST(req: Request) {
@@ -17,10 +19,12 @@ export async function POST(req: Request) {
   const steps = body?.steps
   const currentIndex = body?.currentIndex
   const transcript = body?.transcript ?? []
+  const board = body?.board
   if (
     !Array.isArray(steps) ||
     typeof currentIndex !== "number" ||
-    !steps[currentIndex]
+    !steps[currentIndex] ||
+    !board
   ) {
     return NextResponse.json(
       { error: "invalid teach request" },
@@ -33,9 +37,18 @@ export async function POST(req: Request) {
     .map((s, i) => `Q${currentIndex + 2 + i} (${s.label}): ${s.question}`)
     .join("\n")
 
+  const panels = board.panels
+    .map((p) => `- panel "${p.id}" — ${p.title}: ${p.note}`)
+    .join("\n")
+  const connectors = board.connectors
+    .map((c) => `- connector "${c.id}" — ${c.from} to ${c.to}, labelled "${c.label}"`)
+    .join("\n")
+
   const context =
     `Current question (Q${currentIndex + 1}, ${current.label}): ${current.question}\n` +
-    (upcoming ? `Upcoming:\n${upcoming}\n` : "This is the final question.\n")
+    (upcoming ? `Upcoming:\n${upcoming}\n` : "This is the final question.\n") +
+    `\nThe whiteboard has these panels — these ids are the ONLY things you may draw into:\n${panels}\n` +
+    (connectors ? `\nAnd these connectors:\n${connectors}\n` : "")
 
   const messages = [
     { role: "user" as const, content: `System context:\n${context}` },
@@ -43,7 +56,7 @@ export async function POST(req: Request) {
     {
       role: "user" as const,
       content:
-        "Teach this question now. Emit exactly one NDJSON turn (plan, speak, optional draw, done). Stop after done.",
+        "Teach this question now. Alternate speak and draw so each sentence is followed by the one thing it describes. Emit exactly one NDJSON turn, ending with done. Stop after done.",
     },
   ]
 
