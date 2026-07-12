@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { anthropic, sseResponse } from "@/lib/anthropic"
-import { SVG_MODEL } from "@/lib/models"
+import { PANEL_MODEL } from "@/lib/models"
 import { PANEL_SYSTEM } from "@/lib/prompts"
 import { ShapeLineParser, clampToPanel, type PanelShape } from "@/lib/shapes"
 import { pack, type Rect } from "@/lib/pack"
@@ -57,7 +57,7 @@ export async function POST(req: Request) {
 
   async function* gen() {
     const stream = anthropic.messages.stream({
-      model: SVG_MODEL,
+      model: PANEL_MODEL,
       max_tokens: 2000,
       system: [
         {

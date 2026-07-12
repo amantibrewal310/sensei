@@ -4,8 +4,8 @@ An AI tutor that **narrates a lesson while drawing it on a whiteboard**. You typ
 agent works through it one question at a time, sketching a diagram beside itself as it speaks — and
 you can interrupt in text to ask a question.
 
-> Status: early build. Phase 1 (the board) works. Phase 2 (spoken narration) is in progress — today
-> the teacher's sentences appear as captions under the canvas.
+> Status: early build. The board is planned, drawn, and narrated aloud. Sentences also appear as
+> captions under the canvas.
 
 ## What makes it interesting
 
@@ -26,7 +26,8 @@ held.
 
 **Speech and drawing move in lockstep.** The teacher emits one NDJSON beat per line — a sentence,
 then the single thing that sentence just described — and beats are applied in order as they stream.
-You always know what you are looking at, because you just heard why it is there.
+A sentence's shapes are drawn *while it is being spoken*, but the next sentence waits for the last
+one to finish. You always know what you are looking at, because you just heard why it is there.
 
 ```
 {"type":"speak","text":"A JavaScript program has just one call stack."}
@@ -48,13 +49,17 @@ Browser (React) ── drives the teaching loop
   ├─ POST /api/plan       → teaching questions for a topic (once)
   ├─ POST /api/board      → the whole board: panels on a grid + connectors (once)
   ├─ POST /api/teach (SSE)      → NDJSON beats for one turn
-  └─ POST /api/draw-panel (SSE) → shapes for ONE panel, in panel-local coordinates
+  ├─ POST /api/draw-panel (SSE) → shapes for ONE panel, in panel-local coordinates
+  └─ POST /api/speak            → narration audio for one sentence
 Canvas (tldraw) ◄── panels are frames; connectors are arrows bound to them
+Speaker         ◄── OpenAI TTS, played back one sentence at a time
 ```
 
 - **Reasoning:** Claude (`claude-opus-4-8`) plans the lesson, designs the board, teaches, and draws.
 - **Canvas:** [tldraw](https://tldraw.dev). Frames clip their children, so a panel physically cannot
   spill onto its neighbour; arrows *bind* to frames, so they route themselves.
+- **Narration:** OpenAI text-to-speech. Lines are synthesised a few beats ahead of when they are due,
+  so no sentence begins with a second of dead air.
 
 Used under the tldraw SDK license, which requires the "Made with tldraw" watermark to remain on the
 canvas.
@@ -69,11 +74,13 @@ npm run dev                        # http://localhost:3000
 
 ```
 ANTHROPIC_API_KEY   # planning, teaching, and drawing
-OPENAI_API_KEY      # narration (Phase 2 — not yet wired)
+OPENAI_API_KEY      # narration (text-to-speech)
 ```
 
-Voice is **output only**: narration played to the speaker. There is no microphone capture and no
-barge-in; you interrupt by typing.
+Voice is **output only**. The app never requests microphone access and there is no barge-in — you
+interrupt by typing, which cuts the narration off mid-sentence. There is no "enable voice" switch:
+the lesson simply talks. (A "turn on sound" button appears only if the browser blocks autoplay,
+which happens when `/learn` is opened directly rather than reached from the home page.)
 
 ## Tests
 

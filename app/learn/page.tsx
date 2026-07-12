@@ -30,12 +30,23 @@ function LearnInner() {
 
   return (
     <div className="flex h-screen flex-col bg-neutral-50">
-      <div className="border-b bg-white">
+      <div className="flex items-center justify-between border-b bg-white">
         <ProgressStrip
           current={session.currentIndex}
           total={session.steps.length}
           label={session.steps[session.currentIndex]?.label}
         />
+        {/* Not a "turn voice on" switch — the lesson always narrates. This only
+            appears if the browser refused to play audio without a gesture,
+            which happens when /learn is opened directly rather than from home. */}
+        {session.soundBlocked && (
+          <button
+            className="m-2 rounded border px-3 py-1 text-sm"
+            onClick={session.enableSound}
+          >
+            🔊 Turn on sound
+          </button>
+        )}
       </div>
 
       <div className="relative min-h-0 flex-1">
