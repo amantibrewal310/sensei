@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react"
 import { NdjsonActionParser } from "@/lib/ndjson"
 import type { PanelShape } from "@/lib/shapes"
 import { footprintsOf } from "@/lib/pack"
+import { Narrator } from "@/lib/narrator"
 import type { CanvasApi } from "@/components/Board"
 import type { Layout } from "@/lib/layout"
 import type { Step, TeacherAction } from "@/lib/types"
@@ -11,15 +12,17 @@ import type { Step, TeacherAction } from "@/lib/types"
 type Status = "idle" | "planning" | "teaching" | "done"
 type Msg = { role: "user" | "assistant"; text: string }
 
-/** How long a caption holds before the next beat. Phase 2 replaces this with the speech's own duration. */
+/** How long a caption holds when there is no audio to pace it. */
 function dwell(text: string): number {
   return Math.min(3200, Math.max(900, text.length * 38))
 }
 
 const SHAPE_MS = 280 // the pace of the pen
+/** A sentence should be underway before its shape appears, not simultaneous with it. */
+const LEAD_MS = 450
 
-function wait(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((r) => setTimeout(r, ms))
 }
 
 type Occupied = { x: number; y: number; w: number; h: number; text: string }
@@ -39,6 +42,12 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [status, setStatus] = useState<Status>("idle")
   const [caption, setCaption] = useState("")
+  const [soundBlocked, setSoundBlocked] = useState(false)
+  const [narrator] = useState(() => new Narrator())
+
+  // The sentence currently being spoken. Its drawing runs alongside it, but the
+  // NEXT sentence waits for it — that is what keeps speech and board in step.
+  const speakingRef = useRef<Promise<void>>(Promise.resolve())
 
   const stepsRef = useRef<Step[]>([])
   const indexRef = useRef(0)
@@ -138,8 +147,22 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
         if (gen !== genRef.current) return
         if (a.type === "speak") {
           transcriptRef.current.push({ role: "assistant", text: a.text })
+          // Let the previous sentence land before starting this one.
+          await speakingRef.current
+          if (gen !== genRef.current) return
+
           setCaption(a.text)
-          await wait(dwell(a.text))
+          // Deliberately NOT awaited: the drawing for this sentence should
+          // happen while it is being said, not after it.
+          speakingRef.current = narrator.speak(a.text).then(() => {
+            // With audio blocked there is nothing to pace the lesson, so fall
+            // back to holding the caption long enough to read.
+            if (narrator.blocked) {
+              setSoundBlocked(true)
+              return wait(dwell(a.text))
+            }
+          })
+          await wait(LEAD_MS)
         } else if (a.type === "draw") {
           if ("panel" in a) await drawPanel(gen, a.panel, a.what)
           else {
@@ -150,6 +173,9 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       }
 
       const enqueue = (a: TeacherAction) => {
+        // Synthesis costs about a second. Start it the moment the line is
+        // parsed — several beats before it is due — so it is ready to play.
+        if (a.type === "speak") narrator.prefetch(a.text)
         chain = chain.then(() => handle(a))
       }
 
@@ -178,8 +204,11 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       }
       for (const a of parser.flush()) enqueue(a)
       await chain
+      // The last sentence is still in the air after its shapes have landed.
+      // Don't step on it with the next question.
+      await speakingRef.current
     },
-    [canvas, drawPanel],
+    [canvas, drawPanel, narrator],
   )
 
   // Iterating rather than recursing is deliberate. The old loop called itself
@@ -243,11 +272,30 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
 
   const ask = useCallback(
     (text: string) => {
+      // The learner has cut in. Stop mid-sentence — carrying on talking over a
+      // question is the one thing a tutor must not do.
+      narrator.stop()
+      speakingRef.current = Promise.resolve()
       transcriptRef.current.push({ role: "user", text })
       void beginTurn()
     },
-    [beginTurn],
+    [beginTurn, narrator],
   )
 
-  return { start, ask, steps, currentIndex, status, caption }
+  /** Only ever needed if the browser blocked autoplay — see `Narrator.blocked`. */
+  const enableSound = useCallback(() => {
+    narrator.blocked = false
+    setSoundBlocked(false)
+  }, [narrator])
+
+  return {
+    start,
+    ask,
+    steps,
+    currentIndex,
+    status,
+    caption,
+    soundBlocked,
+    enableSound,
+  }
 }
