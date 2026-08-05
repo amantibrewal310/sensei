@@ -1,5 +1,22 @@
 # sensei Implementation Plan
 
+> **STATUS (2026-07-22): COMPLETE.** Every task below was implemented and committed (all 44 tests
+> pass, `npm run build` and `npx tsc --noEmit` are clean, pushed to `origin/build`). Two parts of
+> this plan were then **deliberately superseded** — the checked boxes record that the work was done,
+> not that the code still exists in this form:
+>
+> - **SVG freehand drawing → planned board + packed panels** (commit `f589efc`). Tasks 1.2, 1.4,
+>   2.4, and Phase 3 (`lib/svg-edit.ts`, `lib/svg-parse.ts`, `/api/draw-svg`, `SvgCanvas`,
+>   `useDrawRequest`, dev draw page) were replaced by `lib/layout.ts`, `lib/pack.ts`,
+>   `lib/shapes.ts`, `components/Board.tsx` (tldraw), `/api/board`, and `/api/draw-panel`.
+>   Code owns all geometry; the LLM never picks a pixel.
+> - **OpenAI Realtime voice (mic, VAD, barge-in) → output-only TTS** (commit `2b06fe7`). Task 2.5
+>   and Phase 4 (`/api/realtime-token`, `voice/`, dev voice page, the "Start voice" button) were
+>   replaced by `/api/speak` + `lib/narrator.ts`. No microphone access ever; interruption is
+>   text-only via the ask box.
+>
+> The README describes the final architecture; git history is the authoritative record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a single Next.js app where a user types a topic and a teacher agent speaks and draws on an SVG canvas in real time, step by step, with voice/text interruption.
@@ -66,7 +83,7 @@ tests/                     # vitest specs (co-located under tests/)
 **Interfaces:**
 - Produces: `TeacherAction`, `Step`, `SvgLineEdit` types; `TEACHER_MODEL`, `SVG_MODEL` constants.
 
-- [ ] **Step 1: Scaffold Next.js into the existing repo (which already has README/LICENSE/docs).**
+- [x] **Step 1: Scaffold Next.js into the existing repo (which already has README/LICENSE/docs).**
 
 `create-next-app` refuses a non-empty dir, so scaffold into a temp folder and move files up.
 
@@ -78,14 +95,14 @@ rsync -a --exclude=.git --exclude=README.md --exclude=.gitignore .scaffold/ .
 rm -rf .scaffold
 ```
 
-- [ ] **Step 2: Install runtime + test deps.**
+- [x] **Step 2: Install runtime + test deps.**
 
 ```bash
 npm install @anthropic-ai/sdk zod
 npm install -D vitest
 ```
 
-- [ ] **Step 3: Add vitest config and a test script.**
+- [x] **Step 3: Add vitest config and a test script.**
 
 Create `vitest.config.mts`:
 
@@ -105,7 +122,7 @@ export default defineConfig({
 
 In `package.json` add to `"scripts"`: `"test": "vitest run"`.
 
-- [ ] **Step 4: Create shared types and model constants.**
+- [x] **Step 4: Create shared types and model constants.**
 
 Create `lib/types.ts`:
 
@@ -136,7 +153,7 @@ export const TEACHER_MODEL = "claude-opus-4-8"
 export const SVG_MODEL = "claude-opus-4-8"
 ```
 
-- [ ] **Step 5: Add `.env.local.example`.**
+- [x] **Step 5: Add `.env.local.example`.**
 
 Create `.env.local.example`:
 
@@ -147,7 +164,7 @@ OPENAI_API_KEY=
 OPENAI_REALTIME_MODEL=gpt-realtime
 ```
 
-- [ ] **Step 6: Verify the app builds and commit.**
+- [x] **Step 6: Verify the app builds and commit.**
 
 ```bash
 npm run build
@@ -172,7 +189,7 @@ These are the highest-value, fully-testable seams. Write tests first.
 - Consumes: `TeacherAction` from `lib/types.ts`.
 - Produces: `class NdjsonActionParser { push(chunk: string): TeacherAction[]; flush(): TeacherAction[] }`. `push` returns actions for every **complete** line seen so far (buffering a trailing partial line); `flush` parses any leftover buffered line. Lines that are not valid actions are skipped silently.
 
-- [ ] **Step 1: Write failing tests.**
+- [x] **Step 1: Write failing tests.**
 
 Create `tests/ndjson.test.ts`:
 
@@ -219,12 +236,12 @@ describe("NdjsonActionParser", () => {
 })
 ```
 
-- [ ] **Step 2: Run tests to verify they fail.**
+- [x] **Step 2: Run tests to verify they fail.**
 
 Run: `npx vitest run tests/ndjson.test.ts`
 Expected: FAIL — `NdjsonActionParser` not found.
 
-- [ ] **Step 3: Implement the parser.**
+- [x] **Step 3: Implement the parser.**
 
 Create `lib/ndjson.ts`:
 
@@ -288,12 +305,12 @@ export class NdjsonActionParser {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass.**
+- [x] **Step 4: Run tests to verify they pass.**
 
 Run: `npx vitest run tests/ndjson.test.ts`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add lib/ndjson.ts tests/ndjson.test.ts
@@ -313,7 +330,7 @@ git commit -m "feat: incremental NDJSON action parser"
   - `applySvgLineEdit(svg: string, edit: SvgLineEdit): { ok: true; svg: string } | { ok: false; error: string }` — 1-indexed. Replaces lines `[start_line, end_line]` inclusive with `content`. An **insertion** is `start_line === end_line + 1` (insert `content` before `start_line`; `start_line` may be `lines.length + 1` to append). Out-of-range returns `{ ok: false }`.
   - `addLineNumbers(svg: string): string` — prefixes each line with `"<n>: "` (1-indexed).
 
-- [ ] **Step 1: Write failing tests.**
+- [x] **Step 1: Write failing tests.**
 
 Create `tests/svg-edit.test.ts`:
 
@@ -383,12 +400,12 @@ describe("addLineNumbers", () => {
 })
 ```
 
-- [ ] **Step 2: Run tests to verify they fail.**
+- [x] **Step 2: Run tests to verify they fail.**
 
 Run: `npx vitest run tests/svg-edit.test.ts`
 Expected: FAIL — functions not defined.
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
 
 Create `lib/svg-edit.ts`:
 
@@ -440,12 +457,12 @@ export function addLineNumbers(svg: string): string {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass.**
+- [x] **Step 4: Run tests to verify they pass.**
 
 Run: `npx vitest run tests/svg-edit.test.ts`
 Expected: PASS (6 tests).
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add lib/svg-edit.ts tests/svg-edit.test.ts
@@ -465,7 +482,7 @@ git commit -m "feat: applySvgLineEdit and addLineNumbers"
   - `PlanJsonSchema` — a JSON Schema object usable by Claude structured outputs.
   - `parsePlan(data: unknown): Step[]` — validates with zod; throws on invalid; assigns `id` = `step-1`, `step-2`, … in order.
 
-- [ ] **Step 1: Write failing tests.**
+- [x] **Step 1: Write failing tests.**
 
 Create `tests/plan-schema.test.ts`:
 
@@ -496,12 +513,12 @@ describe("parsePlan", () => {
 })
 ```
 
-- [ ] **Step 2: Run tests to verify they fail.**
+- [x] **Step 2: Run tests to verify they fail.**
 
 Run: `npx vitest run tests/plan-schema.test.ts`
 Expected: FAIL — `parsePlan` not found.
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
 
 Create `lib/plan-schema.ts`:
 
@@ -548,12 +565,12 @@ export function parsePlan(data: unknown): Step[] {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass.**
+- [x] **Step 4: Run tests to verify they pass.**
 
 Run: `npx vitest run tests/plan-schema.test.ts`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add lib/plan-schema.ts tests/plan-schema.test.ts
@@ -571,7 +588,7 @@ git commit -m "feat: plan zod schema and parsePlan"
 - Consumes: `SvgLineEdit` from `lib/types.ts`.
 - Produces: `parseEditsFromBuffer(buffer: string): SvgLineEdit[]` — given a possibly-incomplete JSON string of the shape `{"edits":[ {..}, {..}, ... ]}`, returns every **complete** edit object decoded so far (ignores a trailing partial object). Only returns objects with numeric `start_line`/`end_line` and string `content`.
 
-- [ ] **Step 1: Write failing tests.**
+- [x] **Step 1: Write failing tests.**
 
 Create `tests/svg-parse.test.ts`:
 
@@ -605,12 +622,12 @@ describe("parseEditsFromBuffer", () => {
 })
 ```
 
-- [ ] **Step 2: Run tests to verify they fail.**
+- [x] **Step 2: Run tests to verify they fail.**
 
 Run: `npx vitest run tests/svg-parse.test.ts`
 Expected: FAIL — function not defined.
 
-- [ ] **Step 3: Implement (brace-scan for complete objects inside the edits array).**
+- [x] **Step 3: Implement (brace-scan for complete objects inside the edits array).**
 
 Create `lib/svg-parse.ts`:
 
@@ -670,12 +687,12 @@ export function parseEditsFromBuffer(buffer: string): SvgLineEdit[] {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass.**
+- [x] **Step 4: Run tests to verify they pass.**
 
 Run: `npx vitest run tests/svg-parse.test.ts`
 Expected: PASS (3 tests).
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add lib/svg-parse.ts tests/svg-parse.test.ts
@@ -697,7 +714,7 @@ git commit -m "feat: parseEditsFromBuffer for incremental SVG edits"
   - `sseResponse(gen: AsyncGenerator<{ event: string; data: unknown }>): Response` — wraps an async generator of `{event,data}` into a `text/event-stream` `Response`.
   - `TEACHER_SYSTEM`, `SVG_SYSTEM` prompt strings.
 
-- [ ] **Step 1: Create the client + SSE helper.**
+- [x] **Step 1: Create the client + SSE helper.**
 
 Create `lib/anthropic.ts`:
 
@@ -745,7 +762,7 @@ export function sseResponse(
 }
 ```
 
-- [ ] **Step 2: Create prompts.**
+- [x] **Step 2: Create prompts.**
 
 Create `lib/prompts.ts`:
 
@@ -783,7 +800,7 @@ Drawing rules:
 - Never place elements outside the given canvas width.`
 ```
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ```bash
 git add lib/anthropic.ts lib/prompts.ts
@@ -803,7 +820,7 @@ _No unit test — this is glue validated by the routes that consume it (Tasks 2.
 - Consumes: `anthropic`, `TEACHER_MODEL`, `PlanJsonSchema`, `parsePlan`.
 - Produces: `POST /api/plan` with body `{ topic: string }` → JSON `{ steps: Step[] }`.
 
-- [ ] **Step 1: Implement the route (structured output, non-streaming — plan is short).**
+- [x] **Step 1: Implement the route (structured output, non-streaming — plan is short).**
 
 Create `app/api/plan/route.ts`:
 
@@ -850,7 +867,7 @@ export async function POST(req: Request) {
 }
 ```
 
-- [ ] **Step 2: Manual verify with a real key.**
+- [x] **Step 2: Manual verify with a real key.**
 
 ```bash
 # with ANTHROPIC_API_KEY set in .env.local and `npm run dev` running:
@@ -860,7 +877,7 @@ curl -s localhost:3000/api/plan -X POST -H 'content-type: application/json' \
 
 Expected: JSON `{"steps":[{"id":"step-1",...}, ...]}` with 3–4 items.
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ```bash
 git add app/api/plan/route.ts
@@ -878,7 +895,7 @@ git commit -m "feat: /api/plan returns a step plan for a topic"
 - Consumes: `anthropic`, `TEACHER_MODEL`, `TEACHER_SYSTEM`, `sseResponse`.
 - Produces: `POST /api/teach` with body `{ steps: Step[]; currentIndex: number; transcript: {role:"user"|"assistant"; text:string}[] }` → SSE stream emitting `event: text` with `{ delta: string }` for each token chunk, then `event: end`. (The client parses NDJSON from the concatenated deltas.)
 
-- [ ] **Step 1: Implement the route.**
+- [x] **Step 1: Implement the route.**
 
 Create `app/api/teach/route.ts`:
 
@@ -943,7 +960,7 @@ export async function POST(req: Request) {
 }
 ```
 
-- [ ] **Step 2: Manual verify.**
+- [x] **Step 2: Manual verify.**
 
 ```bash
 curl -N -s localhost:3000/api/teach -X POST -H 'content-type: application/json' \
@@ -952,7 +969,7 @@ curl -N -s localhost:3000/api/teach -X POST -H 'content-type: application/json' 
 
 Expected: `event: text` lines whose concatenated `delta`s form NDJSON action lines, ending with `event: end`.
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ```bash
 git add app/api/teach/route.ts
@@ -970,7 +987,7 @@ git commit -m "feat: /api/teach streams NDJSON teaching actions over SSE"
 - Consumes: `anthropic`, `SVG_MODEL`, `SVG_SYSTEM`, `sseResponse`, `addLineNumbers`, `parseEditsFromBuffer`, `applySvgLineEdit`.
 - Produces: `POST /api/draw-svg` with body `{ instruction: string; currentSvg: string; canvasWidth: number; snapshotPng?: string }` → SSE: `event: edit` with `SvgLineEdit` for each applied edit (in stream order), then `event: done` with `{ final_svg }`.
 
-- [ ] **Step 1: Implement the route.**
+- [x] **Step 1: Implement the route.**
 
 Create `app/api/draw-svg/route.ts`:
 
@@ -1065,7 +1082,7 @@ export async function POST(req: Request) {
 }
 ```
 
-- [ ] **Step 2: Manual verify.**
+- [x] **Step 2: Manual verify.**
 
 ```bash
 curl -N -s localhost:3000/api/draw-svg -X POST -H 'content-type: application/json' \
@@ -1074,7 +1091,7 @@ curl -N -s localhost:3000/api/draw-svg -X POST -H 'content-type: application/jso
 
 Expected: one or more `event: edit` lines, then `event: done` with `final_svg`.
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ```bash
 git add app/api/draw-svg/route.ts
@@ -1093,7 +1110,7 @@ git commit -m "feat: /api/draw-svg streams applied SVG line edits over SSE"
 
 > NOTE FOR IMPLEMENTER: The OpenAI Realtime ephemeral-session endpoint and model id evolve. Verify the exact endpoint (`POST https://api.openai.com/v1/realtime/sessions`) and current model against the OpenAI Realtime docs before relying on this in production. The shape below is the common form.
 
-- [ ] **Step 1: Implement.**
+- [x] **Step 1: Implement.**
 
 Create `app/api/realtime-token/route.ts`:
 
@@ -1123,7 +1140,7 @@ export async function GET() {
 }
 ```
 
-- [ ] **Step 2: Manual verify.**
+- [x] **Step 2: Manual verify.**
 
 ```bash
 curl -s localhost:3000/api/realtime-token | head -c 400
@@ -1131,7 +1148,7 @@ curl -s localhost:3000/api/realtime-token | head -c 400
 
 Expected: JSON with a `client_secret` (ephemeral) and `model`.
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ```bash
 git add app/api/realtime-token/route.ts
@@ -1150,7 +1167,7 @@ git commit -m "feat: /api/realtime-token mints ephemeral OpenAI Realtime key"
 **Interfaces:**
 - Produces: `<SvgCanvas svg={string} />` — renders the raw SVG string full-bleed; also exposes a way to snapshot to PNG in Task 3.2 (via a ref forwarding the rendered `<svg>` bounding container). For simplicity it renders via `dangerouslySetInnerHTML` inside a sized div.
 
-- [ ] **Step 1: Implement.**
+- [x] **Step 1: Implement.**
 
 Create `components/SvgCanvas.tsx`:
 
@@ -1168,7 +1185,7 @@ export function SvgCanvas({ svg }: { svg: string }) {
 }
 ```
 
-- [ ] **Step 2: Commit.**
+- [x] **Step 2: Commit.**
 
 ```bash
 git add components/SvgCanvas.tsx
@@ -1188,7 +1205,7 @@ _Validated visually in Task 3.3._
 - Consumes: `applySvgLineEdit` (`lib/svg-edit`), `SvgLineEdit` (`lib/types`).
 - Produces: `useDrawRequest({ getSvg, setSvg, canvasWidth })` → `{ draw(instruction: string, snapshotPng?: string): Promise<void> }`. Calls `/api/draw-svg`, applies each streamed `edit` to the working SVG with a ~500ms delay between edits (calling `setSvg` after each), resolves when `done`.
 
-- [ ] **Step 1: Implement.**
+- [x] **Step 1: Implement.**
 
 Create `hooks/useDrawRequest.ts`:
 
@@ -1271,7 +1288,7 @@ export function useDrawRequest(opts: {
 }
 ```
 
-- [ ] **Step 2: Commit.**
+- [x] **Step 2: Commit.**
 
 ```bash
 git add hooks/useDrawRequest.ts
@@ -1289,7 +1306,7 @@ git commit -m "feat: useDrawRequest consumes draw SSE and animates edits"
 - Consumes: `SvgCanvas`, `useDrawRequest`.
 - Produces: a throwaway page with a text box + "Draw" button that draws onto a starter SVG. Used to eyeball the animation.
 
-- [ ] **Step 1: Implement.**
+- [x] **Step 1: Implement.**
 
 Create `app/dev/draw/page.tsx`:
 
@@ -1336,11 +1353,11 @@ export default function DevDraw() {
 }
 ```
 
-- [ ] **Step 2: Verify visually.**
+- [x] **Step 2: Verify visually.**
 
 Run `npm run dev`, open `http://localhost:3000/dev/draw`, click **Draw**. Expected: shapes appear progressively (one edit every ~0.5s).
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ```bash
 git add app/dev/draw/page.tsx
@@ -1363,7 +1380,7 @@ git commit -m "chore: dev page to validate SVG draw animation"
 
 > NOTE FOR IMPLEMENTER: WebRTC SDP exchange with OpenAI Realtime — verify the exact base URL/model query and event names (`conversation.item.create`, `response.create`, `conversation.item.input_audio_transcription.completed`) against current OpenAI Realtime docs. The shape below is the common WebRTC pattern; treat event names as the thing to confirm.
 
-- [ ] **Step 1: Define the interface.**
+- [x] **Step 1: Define the interface.**
 
 Create `voice/types.ts`:
 
@@ -1376,7 +1393,7 @@ export interface VoiceLayer {
 }
 ```
 
-- [ ] **Step 2: Implement the Realtime voice layer.**
+- [x] **Step 2: Implement the Realtime voice layer.**
 
 Create `voice/realtime.ts`:
 
@@ -1477,7 +1494,7 @@ export async function createRealtimeVoice(): Promise<VoiceLayer> {
 }
 ```
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ```bash
 git add voice/types.ts voice/realtime.ts
@@ -1491,7 +1508,7 @@ git commit -m "feat: OpenAI Realtime voice layer behind VoiceLayer interface"
 **Files:**
 - Create: `app/dev/voice/page.tsx`
 
-- [ ] **Step 1: Implement.**
+- [x] **Step 1: Implement.**
 
 Create `app/dev/voice/page.tsx`:
 
@@ -1536,11 +1553,11 @@ export default function DevVoice() {
 }
 ```
 
-- [ ] **Step 2: Verify.**
+- [x] **Step 2: Verify.**
 
 Open `http://localhost:3000/dev/voice`, click **Connect** (allow mic), click **Speak** — you should hear the sentence. Say something — it should appear under "heard:". Speaking while audio plays should cut it off (barge-in).
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ```bash
 git add app/dev/voice/page.tsx
@@ -1561,7 +1578,7 @@ git commit -m "chore: dev page to validate Realtime speak + transcription"
 - Produces: `useTeachingSession({ voice, getSvg, setSvg, canvasWidth })` → `{ start(topic): Promise<void>; steps: Step[]; currentIndex: number; ask(text: string): void; status: "idle"|"planning"|"teaching"|"done" }`.
 - Loop: `start` → POST `/api/plan` → set steps → run turn for step 0. A turn: POST `/api/teach`, feed SSE text into `NdjsonActionParser`; for each action — `speak` → `voice.speak`, `draw` → `useDrawRequest.draw`, `done` → when speech + draw settled, advance to next step (or `done`). `ask(text)` interrupts (`voice.interrupt()`) and starts a new turn with the user text appended to `transcript`.
 
-- [ ] **Step 1: Implement.**
+- [x] **Step 1: Implement.**
 
 Create `hooks/useTeachingSession.ts`:
 
@@ -1685,7 +1702,7 @@ export function useTeachingSession(opts: {
 }
 ```
 
-- [ ] **Step 2: Commit.**
+- [x] **Step 2: Commit.**
 
 ```bash
 git add hooks/useTeachingSession.ts
@@ -1701,7 +1718,7 @@ _Validated end-to-end in Phase 6._
 **Files:**
 - Modify: `hooks/useTeachingSession.ts` (connect `voice.onUserUtterance` → `ask`)
 
-- [ ] **Step 1: Register the utterance handler when a voice layer is provided.**
+- [x] **Step 1: Register the utterance handler when a voice layer is provided.**
 
 In `hooks/useTeachingSession.ts`, add near the top of the hook body (after `ask` is defined, move `ask` above this or use a ref). Add:
 
@@ -1716,7 +1733,7 @@ useEffect(() => {
 
 Add `useEffect` to the React import: `import { useCallback, useEffect, useRef, useState } from "react"`.
 
-- [ ] **Step 2: Commit.**
+- [x] **Step 2: Commit.**
 
 ```bash
 git add hooks/useTeachingSession.ts
@@ -1735,7 +1752,7 @@ git commit -m "feat: route voice utterances into the teaching loop as interrupti
 **Interfaces:**
 - Produces: home page with a topic input; on submit, navigates to `/learn?topic=<encoded>`.
 
-- [ ] **Step 1: Implement.**
+- [x] **Step 1: Implement.**
 
 Replace `app/page.tsx` with:
 
@@ -1774,7 +1791,7 @@ export default function Home() {
 }
 ```
 
-- [ ] **Step 2: Commit.**
+- [x] **Step 2: Commit.**
 
 ```bash
 git add app/page.tsx
@@ -1792,7 +1809,7 @@ git commit -m "feat: home page topic input"
 - Consumes: `SvgCanvas`, `useTeachingSession`, `createRealtimeVoice`, `VoiceLayer`.
 - Produces: the learning screen — canvas center, progress strip on top, a text input to ask, and a "Start voice" button that connects Realtime. On mount, reads `?topic=` and starts the session (drawing works even before voice connects; `voice` is `null` until connected).
 
-- [ ] **Step 1: ProgressStrip.**
+- [x] **Step 1: ProgressStrip.**
 
 Create `components/ProgressStrip.tsx`:
 
@@ -1818,7 +1835,7 @@ export function ProgressStrip({
 }
 ```
 
-- [ ] **Step 2: Learn page.**
+- [x] **Step 2: Learn page.**
 
 Create `app/learn/page.tsx`:
 
@@ -1903,11 +1920,11 @@ export default function Learn() {
 }
 ```
 
-- [ ] **Step 3: Verify end-to-end.**
+- [x] **Step 3: Verify end-to-end.**
 
 Run `npm run dev`. From `/`, type a topic → `/learn` starts; the canvas draws and (after clicking **Start voice**) the teacher speaks; typing a question interrupts and redirects the turn.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git add components/ProgressStrip.tsx app/learn/page.tsx
@@ -1918,9 +1935,9 @@ git commit -m "feat: learn page with canvas, progress strip, voice, and text ask
 
 ## Final: full test run + push
 
-- [ ] Run `npm run test` — all Phase 1 unit suites pass.
-- [ ] Run `npm run build` — the app builds.
-- [ ] Push: `git push`.
+- [x] Run `npm run test` — all Phase 1 unit suites pass.
+- [x] Run `npm run build` — the app builds.
+- [x] Push: `git push`.
 
 ---
 

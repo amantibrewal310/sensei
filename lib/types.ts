@@ -5,16 +5,6 @@ export type DrawAction =
 export type TeacherAction =
   | { type: "speak"; text: string }
   | DrawAction
+  // Code goes to an HTML pane beside the board, not onto it — see lib/code.ts.
+  | { type: "code"; label: string; lines: string[] }
   | { type: "done" }
-
-export function isPanelDraw(
-  a: DrawAction,
-): a is { type: "draw"; panel: string; what: string } {
-  return "panel" in a
-}
-
-export interface Step {
-  id: string
-  label: string
-  question: string
-}

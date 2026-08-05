@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server"
 import { anthropic } from "@/lib/anthropic"
 import { TEACHER_MODEL } from "@/lib/models"
-import { PlanJsonSchema, parsePlan } from "@/lib/plan-schema"
+import { PLAN_SYSTEM, PlanJsonSchema, parsePlan } from "@/lib/lesson"
 
 export const runtime = "nodejs"
 
+// The outline: what pages this lesson has. It is the table of contents the
+// learner navigates by, so it is planned once and never revised — jumping back
+// to "Token bucket" has to land on the same page you left.
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null)
   const topic =
@@ -17,17 +20,13 @@ export async function POST(req: Request) {
 
   const msg = await anthropic.messages.create({
     model: TEACHER_MODEL,
-    max_tokens: 2000,
-    system:
-      "You design a short curiosity-first learning path: 3-4 questions covering why / how / a surprise / limits.",
+    max_tokens: 3000,
+    system: PLAN_SYSTEM,
     output_config: {
       format: { type: "json_schema", schema: PlanJsonSchema },
     },
     messages: [
-      {
-        role: "user",
-        content: `Topic: ${topic}\nReturn 3-4 teaching questions as JSON.`,
-      },
+      { role: "user", content: `Topic: ${topic}\n\nDesign the outline.` },
     ],
   })
 
@@ -36,8 +35,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "no plan" }, { status: 502 })
   }
   try {
-    const steps = parsePlan(JSON.parse(text.text))
-    return NextResponse.json({ steps })
+    return NextResponse.json({ pages: parsePlan(JSON.parse(text.text)) })
   } catch {
     return NextResponse.json({ error: "invalid plan" }, { status: 502 })
   }
