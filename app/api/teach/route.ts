@@ -1,53 +1,58 @@
 import { NextResponse } from "next/server"
-import { anthropic, sseResponse } from "@/lib/anthropic"
+import { anthropic } from "@/lib/anthropic"
+import { sseResponse } from "@/lib/sse"
 import { TEACHER_MODEL } from "@/lib/models"
 import { TEACHER_SYSTEM } from "@/lib/prompts"
-import type { Layout } from "@/lib/layout"
-import type { Step } from "@/lib/types"
+import { describeBoard, type Board } from "@/lib/board"
+import { PAGE_KIND, type Page } from "@/lib/lesson"
 
 export const runtime = "nodejs"
 
 interface Body {
-  steps: Step[]
+  topic: string
+  pages: Page[]
   currentIndex: number
   transcript: { role: "user" | "assistant"; text: string }[]
-  board: Layout
+  board: Board
 }
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as Body | null
-  const steps = body?.steps
+  const pages = body?.pages
   const currentIndex = body?.currentIndex
   const transcript = body?.transcript ?? []
   const board = body?.board
+
   if (
-    !Array.isArray(steps) ||
+    !Array.isArray(pages) ||
     typeof currentIndex !== "number" ||
-    !steps[currentIndex] ||
+    !pages[currentIndex] ||
     !board
   ) {
-    return NextResponse.json(
-      { error: "invalid teach request" },
-      { status: 400 },
-    )
+    return NextResponse.json({ error: "invalid teach request" }, { status: 400 })
   }
-  const current = steps[currentIndex]
-  const upcoming = steps
-    .slice(currentIndex + 1)
-    .map((s, i) => `Q${currentIndex + 2 + i} (${s.label}): ${s.question}`)
+
+  const current = pages[currentIndex]
+
+  // The outline is given in full so the teacher knows what it does NOT have to
+  // cover here. Without it, every page drifts into the next one's material and
+  // the lesson says the same thing five times.
+  const outline = pages
+    .map(
+      (p, i) =>
+        `${i + 1}. ${p.title}${i === currentIndex ? "  <- you are teaching this page" : ""} — ${p.summary}`,
+    )
     .join("\n")
 
-  const panels = board.panels
-    .map((p) => `- panel "${p.id}" — ${p.title}: ${p.note}`)
-    .join("\n")
-  const connectors = board.connectors
-    .map((c) => `- connector "${c.id}" — ${c.from} to ${c.to}, labelled "${c.label}"`)
-    .join("\n")
+  const { panels, connectors } = describeBoard(board)
+  const rule = PAGE_KIND[current.kind].teachingRule
 
   const context =
-    `Current question (Q${currentIndex + 1}, ${current.label}): ${current.question}\n` +
-    (upcoming ? `Upcoming:\n${upcoming}\n` : "This is the final question.\n") +
-    `\nThe whiteboard has these panels — these ids are the ONLY things you may draw into:\n${panels}\n` +
+    `Lesson topic: ${body?.topic ?? ""}\n\nThe lesson's outline:\n${outline}\n\n` +
+    `This page is "${current.title}" (${current.kind}). ` +
+    `The question to work through: ${current.question}\n` +
+    (rule ? `\n${rule}\n` : "") +
+    `\nThis page's whiteboard is empty. These panel ids are the ONLY things you may draw into:\n${panels}\n` +
     (connectors ? `\nAnd these connectors:\n${connectors}\n` : "")
 
   const messages = [
@@ -56,7 +61,7 @@ export async function POST(req: Request) {
     {
       role: "user" as const,
       content:
-        "Teach this question now. Alternate speak and draw so each sentence is followed by the one thing it describes. Emit exactly one NDJSON turn, ending with done. Stop after done.",
+        "Teach this page now. Alternate speak and draw so each sentence is followed by the one thing it describes. Cover this page's question properly and leave the rest of the outline alone. Emit exactly one NDJSON turn, ending with done. Stop after done.",
     },
   ]
 
@@ -67,15 +72,16 @@ export async function POST(req: Request) {
       thinking: { type: "adaptive" },
       output_config: { effort: "high" },
       system: [
-        { type: "text", text: TEACHER_SYSTEM, cache_control: { type: "ephemeral" } },
+        {
+          type: "text",
+          text: TEACHER_SYSTEM,
+          cache_control: { type: "ephemeral" },
+        },
       ],
       messages,
     })
     for await (const ev of stream) {
-      if (
-        ev.type === "content_block_delta" &&
-        ev.delta.type === "text_delta"
-      ) {
+      if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
         yield { event: "text", data: { delta: ev.delta.text } }
       }
     }

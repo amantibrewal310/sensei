@@ -3,28 +3,30 @@ import { anthropic } from "@/lib/anthropic"
 import { TEACHER_MODEL } from "@/lib/models"
 import { BOARD_SYSTEM } from "@/lib/prompts"
 import { BoardJsonSchema, GRID, type Board } from "@/lib/board"
-import { layoutBoard } from "@/lib/layout"
-import type { Step } from "@/lib/types"
+import type { Page } from "@/lib/lesson"
 
 export const runtime = "nodejs"
 
-// Designs the whole board once, before any teaching happens, so that space the
-// last question needs is reserved while the first question is still drawing.
+// One board per page, designed when the page is about to be taught. Doing it per
+// page rather than once for the lesson is what lets a page hold two roomy panels
+// instead of a twelfth of the canvas each.
+//
+// The slots come back as the model asked for them; `layoutBoard` on the client
+// resolves collisions and sizes them, so nothing here has to be trusted.
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as {
     topic?: string
-    steps?: Step[]
+    page?: Page
   } | null
   const topic = body?.topic
-  const steps = body?.steps
+  const page = body?.page
 
-  if (typeof topic !== "string" || !topic.trim() || !Array.isArray(steps)) {
-    return NextResponse.json({ error: "topic and steps required" }, { status: 400 })
+  if (typeof topic !== "string" || !topic.trim() || !page?.question) {
+    return NextResponse.json(
+      { error: "topic and page required" },
+      { status: 400 },
+    )
   }
-
-  const questions = steps
-    .map((s, i) => `Q${i + 1} (${s.label}): ${s.question}`)
-    .join("\n")
 
   const msg = await anthropic.messages.create({
     model: TEACHER_MODEL,
@@ -37,8 +39,10 @@ export async function POST(req: Request) {
       {
         role: "user",
         content:
-          `Topic: ${topic}\n\nThe lesson will work through:\n${questions}\n\n` +
-          `Grid is ${GRID.cols} columns x ${GRID.rows} rows. Design the board.`,
+          `Lesson topic: ${topic}\n\n` +
+          `This page — "${page.title}" (${page.kind}): ${page.summary}\n` +
+          `The question it works through: ${page.question}\n\n` +
+          `Grid is ${GRID.cols} columns x ${GRID.rows} rows. Design this page's board.`,
       },
     ],
   })
@@ -49,10 +53,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const board = JSON.parse(text.text) as Board
-    // The model's slots are a request, not a promise — layoutBoard resolves any
-    // collisions and drops what genuinely has no room.
-    return NextResponse.json(layoutBoard(board))
+    return NextResponse.json(JSON.parse(text.text) as Board)
   } catch {
     return NextResponse.json({ error: "invalid board" }, { status: 502 })
   }

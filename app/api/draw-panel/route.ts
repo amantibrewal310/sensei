@@ -1,58 +1,55 @@
 import { NextResponse } from "next/server"
-import { anthropic, sseResponse } from "@/lib/anthropic"
+import { anthropic } from "@/lib/anthropic"
+import { sseResponse } from "@/lib/sse"
+import { LineParser } from "@/lib/ndjson"
 import { PANEL_MODEL } from "@/lib/models"
 import { PANEL_SYSTEM } from "@/lib/prompts"
-import { ShapeLineParser, clampToPanel, type PanelShape } from "@/lib/shapes"
-import { pack, type Rect } from "@/lib/pack"
+import {
+  describeBlocks,
+  dropRedundantLabel,
+  parseBlock,
+  type Block,
+} from "@/lib/blocks"
 
 export const runtime = "nodejs"
 
 interface Body {
   title: string
-  width: number
-  height: number
+  note: string
   what: string
-  /** The geometry already occupying this panel. Not a description of it — the actual boxes. */
-  occupied: { x: number; y: number; w: number; h: number; text: string }[]
+  /** The blocks this panel already holds, so the model adds rather than repeats. */
+  existing: Block[]
 }
 
+// Streams BLOCKS, not shapes.
+//
+// The old version of this route handed the model a list of occupied rectangles
+// and the first clear y below them, and asked it to place shapes in what was
+// left. That is spatial arithmetic, and the model was bad at it in the specific
+// way LLMs are bad at it — so a collision packer sat downstream repairing the
+// answer, and the repairs were what you saw on the board. There is nothing to
+// repair now: a block cannot express a position, so it cannot express a bad one.
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as Body | null
   const title = body?.title
-  const width = body?.width
-  const height = body?.height
   const what = body?.what
-  const occupied = body?.occupied ?? []
+  const note = body?.note ?? ""
+  const existing = Array.isArray(body?.existing) ? body.existing : []
 
-  if (
-    typeof title !== "string" ||
-    typeof what !== "string" ||
-    !what.trim() ||
-    typeof width !== "number" ||
-    typeof height !== "number"
-  ) {
+  if (typeof title !== "string" || typeof what !== "string" || !what.trim()) {
     return NextResponse.json({ error: "invalid panel request" }, { status: 400 })
   }
 
-  // Telling the model *what* it drew before is useless — it needs to know
-  // WHERE. Handing it the occupied boxes, plus the first clear y below them, is
-  // what stops a panel being drawn on top of itself.
-  const lowest = occupied.reduce((max, o) => Math.max(max, o.y + o.h), 0)
-  const freeY = lowest ? lowest + 14 : 16
+  // `gen` below is a hoisted declaration, so it does not see the narrowing the
+  // guard just did — this const carries it in.
+  const panelTitle: string = title
 
-  const alreadyThere = occupied.length
-    ? `ALREADY DRAWN IN THIS PANEL — these boxes are taken, do not overlap them:\n` +
-      occupied
-        .map(
-          (o) =>
-            `- (${o.x}, ${o.y}) to (${o.x + o.w}, ${o.y + o.h})${o.text ? ` "${o.text}"` : ""}`,
-        )
-        .join("\n") +
-      `\n\nThe first clear space below them starts at y = ${freeY}. There are ${Math.max(0, height - freeY)}px left.`
-    : "This panel is empty. Start at y = 16."
+  const alreadyThere = existing.length
+    ? `This panel already holds these blocks, in order. Add BELOW them, and do not repeat them:\n${describeBlocks(existing)}`
+    : "This panel is empty."
 
   const userText =
-    `Panel: "${title}"\nSize: ${width} x ${height} px (local coordinates, 0,0 is its top-left).\n\n` +
+    `Panel: "${title}"${note ? ` — ${note}` : ""}\n\n` +
     `${alreadyThere}\n\nAdd now:\n${what}`
 
   async function* gen() {
@@ -69,33 +66,23 @@ export async function POST(req: Request) {
       messages: [{ role: "user", content: userText }],
     })
 
-    const parser = new ShapeLineParser()
-    const w = width as number
-    const h = height as number
-
-    // Seeded with what earlier beats left behind, then grown as this beat emits
-    // — so the model cannot collide with the past OR with itself mid-breath.
-    const taken: Rect[] = occupied.map((o) => ({
-      x: o.x,
-      y: o.y,
-      w: o.w,
-      h: o.h,
-      labelled: !!o.text,
-    }))
-
-    const place = function* (shape: PanelShape) {
-      const packed = pack(clampToPanel(shape, w, h), taken, w, h)
-      if (!packed) return // panel is full; a dropped shape beats an unreadable one
-      taken.push(...packed.rects)
-      yield { event: "shape", data: packed.shape }
-    }
+    // Normalised here, at the producer, rather than by whoever happens to be
+    // reading the stream — the rule ("a stack heading must not repeat the frame
+    // label it sits under") is a fact about this prompt, and `title` is right
+    // here. A second consumer, or a replay of stored blocks, gets it too.
+    const parser = new LineParser((line: string) => {
+      const block = parseBlock(line)
+      return block && dropRedundantLabel(block, panelTitle)
+    })
 
     for await (const ev of stream) {
       if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
-        for (const shape of parser.push(ev.delta.text)) yield* place(shape)
+        for (const block of parser.push(ev.delta.text)) {
+          yield { event: "block", data: block }
+        }
       }
     }
-    for (const shape of parser.flush()) yield* place(shape)
+    for (const block of parser.flush()) yield { event: "block", data: block }
 
     yield { event: "done", data: {} }
   }
