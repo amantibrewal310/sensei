@@ -11,6 +11,25 @@ import { z } from "zod"
 export const PAGE_KINDS = ["concept", "algorithm", "code", "recap"] as const
 export type PageKind = (typeof PAGE_KINDS)[number]
 
+/**
+ * A topic as the learner typed it.
+ *
+ * The cap is cost control as much as validation: the topic is sent to the
+ * planner, again with every board request, and again with every teaching turn,
+ * so an essay pasted here is billed once per page for the whole lesson. It also
+ * lands in a URL. Control characters are rejected because they arrive from a
+ * paste gone wrong or an injection attempt, never from someone naming a subject.
+ */
+export const MAX_TOPIC = 200
+const CONTROL = /[\p{Cc}\p{Cf}]/u
+
+export const Topic = z
+  .string()
+  .max(MAX_TOPIC)
+  .transform((t) => t.trim())
+  .refine((t) => t.length > 0, "topic is required")
+  .refine((t) => !CONTROL.test(t), "topic must not contain control characters")
+
 export interface Page {
   id: string
   /** Outline entry — a noun phrase, not a question. "Token bucket". */
@@ -21,6 +40,20 @@ export interface Page {
   question: string
   kind: PageKind
 }
+
+/**
+ * A page coming back *in* from the browser, which is not the same thing as a
+ * page coming out of the planner: this one already carries the id `parsePlan`
+ * assigned. `/api/board` and `/api/teach` are handed these by the client and
+ * cannot assume the client is this app.
+ */
+export const PageSchema = z.object({
+  id: z.string().min(1).max(64),
+  title: z.string().min(1).max(200),
+  summary: z.string().max(500).default(""),
+  question: z.string().min(1).max(500),
+  kind: z.enum(PAGE_KINDS).default("concept"),
+}) satisfies z.ZodType<Page>
 
 /**
  * Everything that varies by page kind, in one exhaustive table.

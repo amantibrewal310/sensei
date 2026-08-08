@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server"
+import { z } from "zod"
 import { anthropic } from "@/lib/anthropic"
 import { TEACHER_MODEL } from "@/lib/models"
 import { BOARD_SYSTEM } from "@/lib/prompts"
-import { BoardJsonSchema, GRID, type Board } from "@/lib/board"
-import type { Page } from "@/lib/lesson"
+import { BoardJsonSchema, BoardSchema, GRID } from "@/lib/board"
+import { PageSchema, Topic } from "@/lib/lesson"
+import { readBody, safeJson } from "@/lib/request"
 
 export const runtime = "nodejs"
+
+const BoardRequest = z.object({ topic: Topic, page: PageSchema })
 
 // One board per page, designed when the page is about to be taught. Doing it per
 // page rather than once for the lesson is what lets a page hold two roomy panels
@@ -14,19 +18,9 @@ export const runtime = "nodejs"
 // The slots come back as the model asked for them; `layoutBoard` on the client
 // resolves collisions and sizes them, so nothing here has to be trusted.
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => null)) as {
-    topic?: string
-    page?: Page
-  } | null
-  const topic = body?.topic
-  const page = body?.page
-
-  if (typeof topic !== "string" || !topic.trim() || !page?.question) {
-    return NextResponse.json(
-      { error: "topic and page required" },
-      { status: 400 },
-    )
-  }
+  const body = await readBody(req, BoardRequest)
+  if (!body.ok) return body.response
+  const { topic, page } = body.data
 
   const msg = await anthropic.messages.create({
     model: TEACHER_MODEL,
@@ -52,9 +46,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "no board" }, { status: 502 })
   }
 
-  try {
-    return NextResponse.json(JSON.parse(text.text) as Board)
-  } catch {
+  // Parsed, not cast. `output_config.format` makes malformed output unlikely
+  // rather than impossible, and these numbers are about to become an occupancy
+  // grid and a set of rectangles — /api/plan already ran its output through
+  // zod, and this route was the one that did not.
+  const board = BoardSchema.safeParse(safeJson(text.text))
+  if (!board.success) {
     return NextResponse.json({ error: "invalid board" }, { status: 502 })
   }
+  return NextResponse.json(board.data)
 }
