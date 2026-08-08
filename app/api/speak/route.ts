@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { env } from "@/lib/env"
 import { TTS_MODEL, TTS_VOICE } from "@/lib/models"
 
 export const runtime = "nodejs"
@@ -18,7 +19,7 @@ export async function POST(req: Request) {
   const res = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
