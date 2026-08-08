@@ -32,6 +32,34 @@ function wait(ms: number): Promise<void> {
 }
 
 /**
+ * The message a route sent with a non-2xx, falling back to `fallback`.
+ *
+ * Every route answers a failure with `{error}`, but a proxy timing out or a
+ * crash upstream answers with HTML or nothing at all — so reading the body must
+ * not itself be able to throw and turn a handled failure into an unhandled one.
+ */
+async function errorFrom(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: unknown }
+    return typeof body.error === "string" ? body.error : fallback
+  } catch {
+    return fallback
+  }
+}
+
+/** Reads the `{message}` payload `sseResponse` sends on its `error` frame. */
+function messageFromErrorFrame(data: string, fallback: string): string {
+  try {
+    const body = JSON.parse(data) as { message?: unknown }
+    return typeof body.message === "string" && body.message
+      ? body.message
+      : fallback
+  } catch {
+    return fallback
+  }
+}
+
+/**
  * One page's canvas: the board it was given, what has been drawn into each
  * panel, and the layout those two produce. The blocks are the source of truth —
  * the layout is recomputed from them every time a panel grows.
@@ -51,6 +79,10 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   const [code, setCode] = useState<Record<string, Snippet[]>>({})
   const [status, setStatus] = useState<Status>("idle")
   const [caption, setCaption] = useState("")
+  // Separate from `caption`, which is the lesson talking. This is the app
+  // admitting something went wrong, and it must not be overwritten by the next
+  // sentence the teacher happens to emit.
+  const [error, setError] = useState<string | null>(null)
   const [soundBlocked, setSoundBlocked] = useState(false)
   const [narrator] = useState(() => new Narrator())
 
@@ -77,14 +109,40 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       }
 
       setCaption(`Setting up “${page.title}”…`)
-      const res = await fetch("/api/board", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ topic: topicRef.current, page }),
-      })
+
+      let res: Response
+      try {
+        res = await fetch("/api/board", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ topic: topicRef.current, page }),
+        })
+      } catch {
+        // Offline, DNS, or a dropped connection. Unlike a superseded turn this
+        // is a real failure, and the learner is owed an explanation.
+        if (gen === genRef.current) {
+          setError(`Couldn't reach the server to set up “${page.title}”.`)
+        }
+        return null
+      }
       if (gen !== genRef.current) return null
-      const board = (await res.json()) as Board
-      if (!board?.panels?.length) return null
+
+      if (!res.ok) {
+        setError(await errorFrom(res, `Couldn't set up “${page.title}”.`))
+        return null
+      }
+
+      let board: Board
+      try {
+        board = (await res.json()) as Board
+      } catch {
+        setError(`The board for “${page.title}” came back malformed.`)
+        return null
+      }
+      if (!board?.panels?.length) {
+        setError(`The board for “${page.title}” came back empty.`)
+        return null
+      }
 
       const state: PageState = {
         board,
@@ -104,17 +162,37 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       if (!panel) return
       canvas.current?.focus(page.id, state.layout, panelId)
 
-      const res = await fetch("/api/draw-panel", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          title: panel.title,
-          note: panel.note,
-          what,
-          existing: state.content.get(panelId) ?? [],
-        }),
-      })
-      if (!res.body || gen !== genRef.current) return
+      let res: Response
+      try {
+        res = await fetch("/api/draw-panel", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            title: panel.title,
+            note: panel.note,
+            what,
+            existing: state.content.get(panelId) ?? [],
+          }),
+        })
+      } catch {
+        if (gen === genRef.current) setError("Lost the connection mid-drawing.")
+        return
+      }
+      if (gen !== genRef.current) return
+
+      // An error response still has a body, so without this check `readSse`
+      // below happily iterates the JSON error, finds no SSE frames, yields
+      // nothing, and the turn returns as though the panel had been drawn — the
+      // page then gets marked taught with an empty panel and nothing anywhere
+      // says why. Silent success is worse than a visible failure.
+      if (!res.ok) {
+        setError(await errorFrom(res, `Couldn't draw into “${panel.title}”.`))
+        return
+      }
+      if (!res.body) {
+        setError(`Couldn't draw into “${panel.title}” — empty response.`)
+        return
+      }
 
       const draw = async (block: Block) => {
         const blocks = [...(state.content.get(panelId) ?? []), block]
@@ -149,6 +227,13 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       )) {
         // The server has already validated and normalised each block.
         if (event === "block") await draw(JSON.parse(data) as Block)
+        // `sseResponse` turns a mid-stream throw into this frame. Nothing read
+        // it before, so a stream that died halfway left a half-drawn panel and
+        // no explanation.
+        else if (event === "error") {
+          setError(messageFromErrorFrame(data, "The drawing stream failed."))
+          return
+        }
       }
     },
     [canvas],
@@ -202,9 +287,21 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
           signal: controller.signal,
         })
       } catch {
-        return // superseded by a newer turn, or a network error
+        // `cancel()` aborts this fetch whenever the learner moves on, and that
+        // is not a failure. A throw while this turn is still the current one is.
+        if (gen === genRef.current) setError("Couldn't reach the teacher.")
+        return
       }
-      if (gen !== genRef.current || !res.body) return
+      if (gen !== genRef.current) return
+
+      if (!res.ok) {
+        setError(await errorFrom(res, "The teacher couldn't start this page."))
+        return
+      }
+      if (!res.body) {
+        setError("The teacher returned an empty response.")
+        return
+      }
 
       const parser = new LineParser(parseAction)
 
@@ -259,9 +356,13 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
           if (event === "text") {
             const { delta } = JSON.parse(data)
             for (const a of parser.push(delta)) enqueue(a)
+          } else if (event === "error") {
+            setError(messageFromErrorFrame(data, "The lesson stream failed."))
+            return
           }
         }
       } catch {
+        if (gen === genRef.current) setError("The lesson stream broke.")
         return
       }
       for (const a of parser.flush()) enqueue(a)
@@ -325,6 +426,8 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   /** Cancels whatever is in flight and starts a new run from `indexRef`. */
   const begin = useCallback(() => {
     cancel()
+    // A new run is the learner's answer to whatever went wrong last time.
+    setError(null)
     return runFrom(genRef.current)
   }, [cancel, runFrom])
 
@@ -332,14 +435,39 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
     async (topic: string) => {
       setStatus("planning")
       setCaption("Planning the lesson…")
+      setError(null)
       topicRef.current = topic
 
-      const res = await fetch("/api/plan", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ topic }),
-      })
-      const { pages: planned } = (await res.json()) as { pages: Page[] }
+      // This fetch used to be unwrapped, so going offline rejected inside a
+      // form handler and surfaced as an unhandled promise rejection rather than
+      // as anything the learner could see.
+      let res: Response
+      try {
+        res = await fetch("/api/plan", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ topic }),
+        })
+      } catch {
+        setStatus("idle")
+        setError("Couldn't reach the server. Check your connection.")
+        return
+      }
+
+      if (!res.ok) {
+        setStatus("idle")
+        setError(await errorFrom(res, "Couldn't plan that lesson."))
+        return
+      }
+
+      let planned: Page[] | undefined
+      try {
+        ;({ pages: planned } = (await res.json()) as { pages: Page[] })
+      } catch {
+        setStatus("idle")
+        setError("The lesson plan came back malformed.")
+        return
+      }
       if (!planned?.length) {
         setStatus("idle")
         setCaption("Couldn't plan that lesson. Try another topic.")
@@ -408,6 +536,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
     taught,
     status,
     caption,
+    error,
     soundBlocked,
     enableSound,
     code: code[pages[currentIndex]?.id ?? ""] ?? [],

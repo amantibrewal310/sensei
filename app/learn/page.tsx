@@ -68,6 +68,19 @@ function LearnInner() {
           <CodePane snippets={session.code} />
         </div>
 
+        {/* Distinct from the caption on purpose: the caption is the lesson
+            talking, this is the app admitting it broke. `role="alert"` so it is
+            announced rather than silently appearing under a canvas nobody is
+            reading. */}
+        {session.error && (
+          <div
+            role="alert"
+            className="border-t border-red-200 bg-red-50 px-6 py-3 text-center text-sm text-red-800"
+          >
+            {session.error}
+          </div>
+        )}
+
         <div className="min-h-16 border-t border-neutral-200 bg-white px-6 py-4">
           <p className="mx-auto max-w-3xl text-center text-lg leading-snug text-neutral-800">
             {session.caption}
