@@ -6,8 +6,11 @@ import { PANEL_MODEL } from "@/lib/models"
 import { PANEL_SYSTEM } from "@/lib/prompts"
 import { Block, describeBlocks, dropRedundantLabel, parseBlock } from "@/lib/blocks"
 import { readBody } from "@/lib/request"
+import { logUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
+// Vercel Hobby: 10s default, 60s ceiling. See app/api/plan/route.ts.
+export const maxDuration = 60
 
 const DrawPanelRequest = z.object({
   title: z.string().min(1).max(200),
@@ -48,6 +51,7 @@ export async function POST(req: Request) {
     `${alreadyThere}\n\nAdd now:\n${what}`
 
   async function* gen() {
+    const started = Date.now()
     const stream = anthropic.messages.stream({
       model: PANEL_MODEL,
       max_tokens: 2000,
@@ -78,6 +82,10 @@ export async function POST(req: Request) {
       }
     }
     for (const block of parser.flush()) yield { event: "block", data: block }
+
+    // Highest-volume call in the app — one per drawing beat — so this is the
+    // line that says whether the panel prompt's cache is live.
+    logUsage("draw-panel", PANEL_MODEL, (await stream.finalMessage()).usage, Date.now() - started)
 
     yield { event: "done", data: {} }
   }

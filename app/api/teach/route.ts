@@ -6,8 +6,13 @@ import { TEACHER_SYSTEM } from "@/lib/prompts"
 import { BoardSchema, describeBoard } from "@/lib/board"
 import { PAGE_KIND, PageSchema, Topic } from "@/lib/lesson"
 import { readBody } from "@/lib/request"
+import { logUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
+// Vercel Hobby: 10s default, 60s ceiling — and the ceiling covers the whole
+// stream, not just time-to-first-byte. This is the route most at risk of
+// exceeding it; see the timing note in docs/plans/2026-08-08-production-readiness.md.
+export const maxDuration = 60
 
 // The transcript is resent in full on every turn, so its bound is a cost
 // control, not a formality: an unbounded array here is an unbounded prompt
@@ -77,6 +82,7 @@ export async function POST(req: Request) {
   ]
 
   async function* gen() {
+    const started = Date.now()
     const stream = anthropic.messages.stream({
       model: TEACHER_MODEL,
       max_tokens: 4000,
@@ -96,6 +102,14 @@ export async function POST(req: Request) {
         yield { event: "text", data: { delta: ev.delta.text } }
       }
     }
+
+    // The loop above only ever looked at text deltas, so `message_start` and
+    // `message_delta` — the two events that carry usage and the cache counters —
+    // went past unread. The SDK accumulates them regardless, so asking for the
+    // final message after iterating costs nothing and is the only way to see
+    // whether the cache_control marker above is doing anything.
+    logUsage("teach", TEACHER_MODEL, (await stream.finalMessage()).usage, Date.now() - started)
+
     yield { event: "end", data: {} }
   }
 
