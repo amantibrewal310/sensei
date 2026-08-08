@@ -1,5 +1,7 @@
 # sensei
 
+[![CI](https://github.com/amantibrewal310/sensei/actions/workflows/ci.yml/badge.svg)](https://github.com/amantibrewal310/sensei/actions/workflows/ci.yml)
+
 An AI tutor that **narrates a lesson while drawing it on a whiteboard**. You type a topic; it plans
 an outline, then works through it a page at a time — speaking, sketching a diagram beside itself, and
 showing code where code is the honest answer. You can interrupt in text, and jump to any page from
@@ -108,9 +110,13 @@ which happens when `/learn` is opened directly rather than reached from the home
 ## Tests
 
 ```bash
-npm test        # measurement, block parsing, rendering, layout, NDJSON beats
-npx tsc --noEmit
+npm test        # measurement, block parsing, rendering, layout, NDJSON beats, env
+npm run typecheck
+npm run lint
 ```
+
+CI runs all four plus `npm run build` on every push and pull request, on the Node version in
+`.nvmrc`.
 
 The geometry guarantees are the part worth testing, and they are: a box is always wide enough for its
 longest word, a chain turns downward rather than being squeezed, a panel is never smaller than its
