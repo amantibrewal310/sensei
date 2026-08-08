@@ -31,6 +31,10 @@ const EnvSchema = z.object({
   // returns. Checked on every sign-in rather than only at account creation —
   // see the `signIn` event in lib/auth.ts for why that difference matters.
   ADMIN_EMAIL: z.email(),
+  // Resend. The prefix is their own format, and checking it catches the usual
+  // slip of pasting the key's *name* from the dashboard list rather than the
+  // key, which is only visible once.
+  RESEND_API_KEY: z.string().startsWith("re_"),
 })
 
 export type Env = z.infer<typeof EnvSchema>
@@ -44,6 +48,7 @@ const PURPOSE: Record<keyof Env, string> = {
   AUTH_GOOGLE_ID: "the Google sign-in button — see docs/setup.md §3",
   AUTH_GOOGLE_SECRET: "the Google sign-in button — see docs/setup.md §3",
   ADMIN_EMAIL: "the account that approves everyone else",
+  RESEND_API_KEY: "telling you that someone is waiting for approval",
 }
 
 function load(): Env {

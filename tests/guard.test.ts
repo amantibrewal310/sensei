@@ -12,7 +12,7 @@ let session: { user?: FakeUser } | null = null
 
 vi.mock("@/lib/auth", () => ({ auth: async () => session }))
 
-const { requireApproved } = await import("@/lib/guard")
+const { requireApproved, assertAdmin } = await import("@/lib/guard")
 
 const APPROVED: FakeUser = {
   id: "u_1",
@@ -81,5 +81,37 @@ describe("requireApproved", () => {
   it("refuses a session with no email", async () => {
     session = { user: { ...APPROVED, email: null } }
     expect(await refusal()).toMatchObject({ status: 401 })
+  })
+})
+
+describe("assertAdmin", () => {
+  const ADMIN = { ...APPROVED, id: "u_admin", role: "admin" }
+
+  beforeEach(() => {
+    session = null
+  })
+
+  it("returns the administrator", async () => {
+    session = { user: { ...ADMIN } }
+    await expect(assertAdmin()).resolves.toMatchObject({ id: "u_admin", role: "admin" })
+  })
+
+  it("throws for an ordinary approved learner", async () => {
+    // The case that matters most. A server action is a POST endpoint with a
+    // generated name — an approved learner who finds the name can call it, and
+    // "the button is only rendered for admins" stops nobody.
+    session = { user: { ...APPROVED } }
+    await expect(assertAdmin()).rejects.toThrow(/not authorised/)
+  })
+
+  it("throws for nobody at all", async () => {
+    await expect(assertAdmin()).rejects.toThrow(/not authorised/)
+  })
+
+  it("throws for an admin whose own account is not approved", async () => {
+    // Both columns are checked, not just the interesting one: a rejected
+    // administrator is still rejected.
+    session = { user: { ...ADMIN, status: "rejected" } }
+    await expect(assertAdmin()).rejects.toThrow(/not authorised/)
   })
 })

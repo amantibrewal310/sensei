@@ -17,6 +17,7 @@ export default defineConfig({
       AUTH_GOOGLE_ID: "test.apps.googleusercontent.com",
       AUTH_GOOGLE_SECRET: "test-google-secret",
       ADMIN_EMAIL: "admin@example.com",
+      RESEND_API_KEY: "re_test",
     },
   },
   resolve: {

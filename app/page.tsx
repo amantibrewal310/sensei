@@ -14,8 +14,11 @@ export default async function Home() {
       <header className="absolute top-0 right-0 flex items-center gap-3 p-4 text-sm">
         {user ? (
           <>
-            {/* The link to /admin belongs here and lands with the page it
-                points at, rather than sitting broken in between. */}
+            {user.role === "admin" && (
+              <Link href="/admin" className="text-neutral-600 underline">
+                Approvals
+              </Link>
+            )}
             <span className="text-neutral-500">{user.email}</span>
             <form
               action={async () => {

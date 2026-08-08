@@ -27,6 +27,10 @@ are the load-bearing parts. They are tested hard and changed carefully.
   means adding a model without pricing it fails to compile.
 - **A failure the user cannot see is worse than one they can.** Routes answer `{error}`; the client
   shows it. Never mark a page taught on a path that did not teach it.
+- **A server action is a boundary, not a private function.** It compiles to a POST endpoint with a
+  generated name, callable by anything that can guess it — so every action begins with
+  `assertAdmin()` (or `requireApproved()`) and zod-parses its own arguments. "The button is only
+  rendered for admins" is not a check.
 - **Every route that spends money calls `requireApproved()` first**, before it reads the body.
   `proxy.ts` is not that check — it sees a cookie, not a session, and a Next.js edge hook is not a
   security boundary. A new route under `app/api/` is guarded and added to the table in
@@ -62,7 +66,13 @@ all: Auth.js refuses to link a Google account to a pre-existing row by email
 (`OAuthAccountNotLinked`).
 
 Sessions are in the database, not a JWT. It costs a query per request and it is why an approval
-reaches someone on their next page load instead of their next sign-out.
+reaches someone on their next page load instead of their next sign-out — verified, not assumed: a
+pending session goes from 403 to 200 across an approval without the cookie changing.
+
+Mail goes to `ADMIN_EMAIL` and nowhere else. Resend's shared sender only delivers to the address its
+account was opened with, so **a learner is never emailed**, including when approved — `/pending`
+polls instead. Do not add a message to a learner without verifying a domain first; it will be
+accepted by the API and never arrive.
 
 ## Testing
 

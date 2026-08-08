@@ -20,8 +20,7 @@ export type Gate = { ok: true; user: Learner } | { ok: false; response: NextResp
 
 /** The reason, in words a learner can act on rather than a status code. */
 const DENIED: Record<"pending" | "rejected", string> = {
-  pending:
-    "Your account is waiting for approval. You will get an email when it is ready.",
+  pending: "Your account is waiting for approval. Reload once it has been granted.",
   rejected: "Your account was not approved for this app.",
 }
 
@@ -55,4 +54,26 @@ export async function requireApproved(): Promise<Gate> {
   }
 
   return { ok: true, user: { id: user.id, email: user.email, role: user.role } }
+}
+
+/**
+ * The signed-in administrator, or a throw.
+ *
+ * For **server actions**, which are the reason this exists in this shape. A
+ * server action is a POST endpoint with a generated name — not a private
+ * function, however much it reads like one where it is defined. Anything that
+ * can guess the name can call it, so "only the admin page renders this button"
+ * is not a check. Approving your own account is one unguarded action away.
+ *
+ * It throws rather than returning a union because there is no sensible way for
+ * a caller to continue: the action's whole purpose was the thing being refused.
+ */
+export async function assertAdmin(): Promise<Learner> {
+  const user = (await auth())?.user
+
+  if (!user?.id || !user.email || user.role !== "admin" || user.status !== "approved") {
+    throw new Error("not authorised")
+  }
+
+  return { id: user.id, email: user.email, role: user.role }
 }

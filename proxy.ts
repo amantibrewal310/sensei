@@ -31,5 +31,5 @@ export const config = {
   // redirecting one to /login hands the client an HTML page where it expected
   // `{error}`, which surfaces as a parse failure naming nothing. Those routes
   // guard themselves.
-  matcher: ["/learn/:path*"],
+  matcher: ["/learn/:path*", "/admin/:path*"],
 }

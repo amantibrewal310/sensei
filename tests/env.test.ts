@@ -11,6 +11,7 @@ const MANAGED = [
   "AUTH_GOOGLE_ID",
   "AUTH_GOOGLE_SECRET",
   "ADMIN_EMAIL",
+  "RESEND_API_KEY",
   "SKIP_ENV_VALIDATION",
 ] as const
 
@@ -23,6 +24,7 @@ const ALL = {
   AUTH_GOOGLE_ID: "1234.apps.googleusercontent.com",
   AUTH_GOOGLE_SECRET: "GOCSPX-test-secret",
   ADMIN_EMAIL: "admin@example.com",
+  RESEND_API_KEY: "re_test_key",
 }
 
 async function importEnv(vars: Partial<Record<string, string>>) {
@@ -103,6 +105,14 @@ describe("env", () => {
     // email matches nobody, and the symptom is an app with no admin in it.
     await expect(importEnv({ ...ALL, ADMIN_EMAIL: "admin" })).rejects.toThrow(
       /ADMIN_EMAIL/,
+    )
+  })
+
+  it("rejects a RESEND_API_KEY that is not one", async () => {
+    // The dashboard lists keys by *name* next to a masked value, and the name
+    // is what copies cleanly. Only the key itself starts `re_`.
+    await expect(importEnv({ ...ALL, RESEND_API_KEY: "sensei" })).rejects.toThrow(
+      /RESEND_API_KEY/,
     )
   })
 
