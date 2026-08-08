@@ -37,7 +37,14 @@ npm run typecheck
 npm run lint
 npm run format    # prettier --write; format:check is what CI runs
 npm run build
+
+npm run db:generate   # schema change → a new file in drizzle/
+npm run db:migrate    # apply it, through DATABASE_URL_UNPOOLED
+npm run db:studio     # browse the data
 ```
+
+Migrations are checked in. Never `db push` — the point of `drizzle/` is that the history of the
+schema is readable, and pushing skips writing it down.
 
 CI runs typecheck, lint, format:check, test and build on every push.
 

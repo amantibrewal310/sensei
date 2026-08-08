@@ -60,7 +60,17 @@ Why both: the app opens a connection per request and needs the pooler, but schem
 locks that a transaction-mode pooler will not hold. Running migrations through the pooled URL fails
 in ways that read as random.
 
-4. Add both to Vercel's environment variables as well.
+4. Add both to Vercel's environment variables as well. **`DATABASE_URL` is now required at boot** —
+   `lib/env.ts` validates it, so a deploy without it fails to start rather than failing on the
+   first request that needs a database.
+5. Create the tables:
+
+   ```bash
+   npm run db:migrate
+   ```
+
+   Migrations are checked in under `drizzle/`. Re-running is safe; already-applied files are
+   skipped.
 
 ## 3. Google — the sign-in button
 
