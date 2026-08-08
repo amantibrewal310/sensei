@@ -4,7 +4,7 @@ import { sseResponse } from "@/lib/sse"
 import { TEACHER_MODEL } from "@/lib/models"
 import { TEACHER_SYSTEM } from "@/lib/prompts"
 import { BoardSchema, describeBoard } from "@/lib/board"
-import { PAGE_KIND, PageSchema, Topic } from "@/lib/lesson"
+import { MAX_TRANSCRIPT, PAGE_KIND, PageSchema, Topic } from "@/lib/lesson"
 import { readBody } from "@/lib/request"
 import { logUsage } from "@/lib/usage"
 
@@ -13,12 +13,6 @@ export const runtime = "nodejs"
 // stream, not just time-to-first-byte. This is the route most at risk of
 // exceeding it; see the timing note in docs/plans/2026-08-08-production-readiness.md.
 export const maxDuration = 60
-
-// The transcript is resent in full on every turn, so its bound is a cost
-// control, not a formality: an unbounded array here is an unbounded prompt
-// billed once per beat. The client caps it too; this is the backstop for when
-// the client is not this app.
-const MAX_TRANSCRIPT = 40
 
 const TeachRequest = z
   .object({

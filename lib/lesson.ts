@@ -30,6 +30,27 @@ export const Topic = z
   .refine((t) => t.length > 0, "topic is required")
   .refine((t) => !CONTROL.test(t), "topic must not contain control characters")
 
+/**
+ * How much of the conversation the teacher is shown, and the most `/api/teach`
+ * will accept.
+ *
+ * The transcript is re-sent in full on every turn, so it is the one input here
+ * that grows without bound. A measured page emits seven spoken lines, and every
+ * question adds another message, so a nine-page lesson ends up resending sixty
+ * or more — the whole history, billed again on each remaining page.
+ *
+ * WINDOW is what this app sends: the last few pages of conversation. It can be
+ * this small because the full outline, every page title and summary, is already
+ * in the system context of every turn — so the transcript only has to carry the
+ * recent detail the outline does not.
+ *
+ * MAX is the route's bound and is deliberately the larger of the two. It exists
+ * for a client that is not this app, and a backstop that trips during ordinary
+ * use is a bug rather than a limit. Whatever WINDOW becomes, keep it under MAX.
+ */
+export const TRANSCRIPT_WINDOW = 24
+export const MAX_TRANSCRIPT = 40
+
 export interface Page {
   id: string
   /** Outline entry — a noun phrase, not a question. "Token bucket". */

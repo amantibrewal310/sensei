@@ -8,13 +8,48 @@ import type { CanvasApi } from "@/components/Board"
 import type { Block } from "@/lib/blocks"
 import type { Board } from "@/lib/board"
 import type { Snippet } from "@/lib/code"
-import type { Page } from "@/lib/lesson"
+import { TRANSCRIPT_WINDOW, type Page } from "@/lib/lesson"
 import { layoutBoard, panelById, type Layout } from "@/lib/layout"
 import { renderPanel } from "@/lib/render"
 import type { TeacherAction } from "@/lib/types"
 
 type Status = "idle" | "planning" | "teaching" | "done"
-type Msg = { role: "user" | "assistant"; text: string }
+export type Msg = { role: "user" | "assistant"; text: string }
+
+/**
+ * Adds a message to the transcript, dropping the oldest to stay inside
+ * `TRANSCRIPT_WINDOW`.
+ *
+ * Trimmed as it is written rather than as it is sent: the array is then bounded
+ * everywhere it is read, instead of every future reader having to remember to
+ * bound it. Oldest-first is what keeps the learner's latest question — always
+ * the message pushed most recently — from being the one thrown away.
+ */
+export function remember(transcript: Msg[], msg: Msg): void {
+  transcript.push(msg)
+  if (transcript.length > TRANSCRIPT_WINDOW) {
+    transcript.splice(0, transcript.length - TRANSCRIPT_WINDOW)
+  }
+}
+
+/**
+ * What one turn has left of its `/api/draw-panel` allowance. Mutable, and shared
+ * by every beat of that turn.
+ */
+interface Beats {
+  left: number
+}
+
+/**
+ * The most drawing calls one teaching turn may make.
+ *
+ * `TEACHER_SYSTEM` asks for four to seven spoken lines with one drawing apiece,
+ * and a measured page came back with six — so this is about twice what a turn
+ * that follows its instructions needs. It is here for the turn that does not: a
+ * model that keeps emitting draw beats spends an Opus call on each, and this is
+ * the only thing in the client that says when to stop.
+ */
+const MAX_PANEL_BEATS = 12
 
 /** How long a caption holds when there is no audio to pace it. */
 function dwell(text: string): number {
@@ -157,9 +192,29 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   )
 
   const drawPanel = useCallback(
-    async (gen: number, page: Page, state: PageState, panelId: string, what: string) => {
+    async (
+      gen: number,
+      page: Page,
+      state: PageState,
+      beats: Beats,
+      panelId: string,
+      what: string,
+    ) => {
       const panel = panelById(state.layout, panelId)
       if (!panel) return
+
+      // Said out loud rather than quietly skipped. A board that stops filling in
+      // with no explanation is the same silent failure the `!res.ok` check below
+      // exists to prevent — and if this ever trips in front of anyone, the
+      // reason should be on screen and not in a log.
+      if (beats.left <= 0) {
+        setError(
+          `“${page.title}” asked for more than ${MAX_PANEL_BEATS} drawings, so the rest were skipped.`,
+        )
+        return
+      }
+      beats.left -= 1
+
       canvas.current?.focus(page.id, state.layout, panelId)
 
       let res: Response
@@ -272,6 +327,11 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       const controller = new AbortController()
       abortRef.current = controller
 
+      // Per turn, not per page. Asking a question re-teaches the page, and a
+      // learner three questions in should not find that the board has quietly
+      // stopped drawing because an earlier pass spent the page's allowance.
+      const beats: Beats = { left: MAX_PANEL_BEATS }
+
       let res: Response
       try {
         res = await fetch("/api/teach", {
@@ -313,7 +373,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       const handle = async (a: TeacherAction) => {
         if (gen !== genRef.current) return
         if (a.type === "speak") {
-          transcriptRef.current.push({ role: "assistant", text: a.text })
+          remember(transcriptRef.current, { role: "assistant", text: a.text })
           // Let the previous sentence land before starting this one.
           await speakingRef.current
           if (gen !== genRef.current) return
@@ -333,7 +393,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
         } else if (a.type === "code") {
           await showCode(gen, page, a.label, a.lines)
         } else if (a.type === "draw") {
-          if ("panel" in a) await drawPanel(gen, page, state, a.panel, a.what)
+          if ("panel" in a) await drawPanel(gen, page, state, beats, a.panel, a.what)
           else {
             canvas.current?.addConnector(page.id, state.layout, a.connector)
             await wait(SHAPE_MS * 2)
@@ -515,7 +575,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       // The learner has cut in. `begin` stops the teacher mid-sentence —
       // carrying on talking over a question is the one thing a tutor must not
       // do — and re-runs this page with the question in the transcript.
-      transcriptRef.current.push({ role: "user", text })
+      remember(transcriptRef.current, { role: "user", text })
       void begin()
     },
     [begin],
