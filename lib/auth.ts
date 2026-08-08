@@ -5,6 +5,8 @@ import { and, eq, ne } from "drizzle-orm"
 import { db, accounts, sessions, users, verificationTokens } from "@/lib/db"
 import { env } from "@/lib/env"
 import { isAdminEmail } from "@/lib/admin"
+import { mailSignup } from "@/lib/email"
+import { appUrl } from "@/lib/redirect"
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: DrizzleAdapter(db, {
@@ -65,6 +67,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         .update(users)
         .set({ status: "approved", role: "admin", approvedAt: new Date() })
         .where(and(eq(users.id, user.id), ne(users.role, "admin")))
+    },
+
+    async createUser({ user }) {
+      // Only on the row actually being created, so the administrator is not
+      // told about their own arrival — and this is the one moment the app knows
+      // someone new is now sitting in a queue that nothing else will announce.
+      if (!user.email || isAdminEmail(user.email)) return
+      await mailSignup({ name: user.name, email: user.email }, appUrl("/admin"))
     },
   },
 })

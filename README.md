@@ -155,8 +155,9 @@ page taught.
 - **No spend cap yet.** Access is gated, so an unapproved account cannot spend anything — but an
   approved one is not yet bounded. The usage logging it needs is already in place, and
   `usage_event` is already the table it writes to.
-- **Approvals are a database update.** The admin page and the "someone is waiting" email are next;
-  until then a pending account is approved with SQL.
+- **Learners are never emailed.** Resend's shared sender only delivers to the address the account was
+  opened with, so the administrator can be written to and a learner cannot. `/pending` polls itself
+  instead of promising a message that would never arrive.
 
 ## License
 

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 import { auth, signOut } from "@/lib/auth"
+import { PollForApproval } from "@/components/PollForApproval"
 
 export const metadata = { title: "Waiting for approval — sensei" }
 
@@ -24,11 +25,15 @@ export default async function Pending() {
           <>This account was not approved for sensei.</>
         ) : (
           <>
-            Your request is with the administrator. You will get an email when it is
-            approved — then reload this page and the lesson is yours.
+            Your request is with the administrator. Leave this page open — it checks for
+            itself, and the moment you are approved the lesson is yours.
           </>
         )}
       </p>
+
+      {/* Only while there is something to wait for. A rejected account polling
+          forever is a page pretending a decision has not been made. */}
+      {!rejected && <PollForApproval />}
 
       <p className="text-sm text-neutral-500">Signed in as {session.user.email}</p>
 

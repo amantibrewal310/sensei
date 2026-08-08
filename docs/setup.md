@@ -139,6 +139,15 @@ has ever been on a laptop is not a production secret.
 2. **Skip domain verification.** Resend's shared `onboarding@resend.dev` sender can send to _your own
    verified address_, which is all this needs — the only recipient is you, being told someone is
    waiting. Verifying a domain matters when you email strangers, and this never does.
+
+   > That restriction is why **a learner is never emailed**, including when they are approved. The
+   > `/pending` page polls instead, and says so; sessions are read from the database, so an approval
+   > lands on its own. If you ever do verify a domain, that is the moment to revisit it.
+   >
+   > The Resend account must be the one opened with `ADMIN_EMAIL` — otherwise the shared sender
+   > refuses, and `lib/email.ts` logs `{"at":"email","ok":false,"status":403}` rather than failing
+   > anyone's sign-in.
+
 3. Set `ADMIN_EMAIL` to the address that should get those emails and be allowed into `/admin`.
 
 > **It has to be an account you can sign in to Google with.** It is compared against the address
@@ -199,5 +208,5 @@ They unblock different work, so partial is genuinely useful — send what you ha
 | ------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`            | ✅ done — schema and migrations. Also unblocks lesson persistence, which is still to come.               |
 | `+ AUTH_*`, `ADMIN_EMAIL` | ✅ done — Google sign-in, the pending/approved gate, and every route refusing a caller it does not know. |
-| `+ RESEND_API_KEY`        | The admin approval page and the "someone is waiting" email                                               |
+| `+ RESEND_API_KEY`        | ✅ done — `/admin`, the approve and reject buttons, and the "someone is waiting" email.                  |
 | All of it                 | The spend cap and rate limit, which need a user to attribute cost to                                     |
