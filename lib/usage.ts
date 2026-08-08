@@ -1,4 +1,5 @@
 import { PRICES, type ModelId } from "./models"
+import { db, usageEvents } from "@/lib/db"
 
 // What every model call cost, and how long it took.
 //
@@ -50,9 +51,14 @@ export function costMicros(model: ModelId, usage: TokenUsage): number {
   )
 }
 
-/** Micros back to a human "$0.0123", for logs and eventually for the admin page. */
+/** Micros back to a human "$0.0123", for logs where four places matter. */
 export function formatMicros(micros: number): string {
   return `$${(micros / 1_000_000).toFixed(4)}`
+}
+
+/** The same number for a sentence a person reads: "$5.00", not "$5.0000". */
+export function formatDollars(micros: number): string {
+  return `$${(micros / 1_000_000).toFixed(2)}`
 }
 
 /**
@@ -66,16 +72,18 @@ export function formatMicros(micros: number): string {
  */
 export function logUsage(
   route: string,
-  model: ModelId,
+  model: string,
   usage: TokenUsage,
   ms: number,
+  micros: number,
+  userId?: string,
 ): void {
-  const micros = costMicros(model, usage)
   console.log(
     JSON.stringify({
       at: "usage",
       route,
       model,
+      user: userId,
       ms,
       input: usage.input_tokens,
       output: usage.output_tokens,
@@ -85,4 +93,60 @@ export function logUsage(
       cost: formatMicros(micros),
     }),
   )
+}
+
+interface Recorded {
+  route: string
+  userId: string
+  model: string
+  usage: TokenUsage
+  ms: number
+  /** Pre-computed for models PRICES does not cover — narration, priced per character. */
+  micros: number
+}
+
+/**
+ * The log line, plus a row the spend cap can read.
+ *
+ * The row is the part that matters: `lib/limits.ts` sums this table, so a call
+ * that is not recorded here is a call that is free as far as every cap is
+ * concerned. That is why a failure to insert is logged loudly rather than
+ * swallowed — under-counting spend is the one way this module can lie.
+ *
+ * It still does not throw. The model call has already happened and been paid
+ * for; failing the response as well would cost the learner their page and
+ * refund nobody.
+ */
+export async function recordUsage(row: Recorded): Promise<void> {
+  logUsage(row.route, row.model, row.usage, row.ms, row.micros, row.userId)
+
+  try {
+    await db.insert(usageEvents).values({
+      userId: row.userId,
+      route: row.route,
+      model: row.model,
+      inputTokens: row.usage.input_tokens,
+      outputTokens: row.usage.output_tokens,
+      cacheReadTokens: row.usage.cache_read_input_tokens ?? 0,
+      cacheCreationTokens: row.usage.cache_creation_input_tokens ?? 0,
+      costMicros: row.micros,
+      ms: row.ms,
+    })
+  } catch (err) {
+    console.log(
+      JSON.stringify({
+        at: "usage",
+        ok: false,
+        error: String(err),
+        note: "spend not recorded — every cap now under-counts by this call",
+      }),
+    )
+  }
+}
+
+/** `recordUsage` for a Claude call, which knows its own price. */
+export function recordModelUsage(
+  row: Omit<Recorded, "micros"> & { model: ModelId },
+): Promise<void> {
+  return recordUsage({ ...row, micros: costMicros(row.model, row.usage) })
 }

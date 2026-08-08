@@ -4,8 +4,8 @@ import { anthropic } from "@/lib/anthropic"
 import { TEACHER_MODEL } from "@/lib/models"
 import { PLAN_SYSTEM, PlanJsonSchema, Topic, parsePlan } from "@/lib/lesson"
 import { readBody, safeJson } from "@/lib/request"
-import { requireApproved } from "@/lib/guard"
-import { logUsage } from "@/lib/usage"
+import { withGuard } from "@/lib/guard"
+import { recordModelUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
 // Vercel Hobby defaults a function to 10s and caps it at 60. This route already
@@ -13,17 +13,16 @@ export const runtime = "nodejs"
 // very first request of every lesson.
 export const maxDuration = 60
 
+// Named once: withGuard puts it in the log line, recordUsage puts it in
+// `usage_event.route`, and the spend cap reads that column.
+const ROUTE = "plan"
+
 const PlanRequest = z.object({ topic: Topic })
 
 // The outline: what pages this lesson has. It is the table of contents the
 // learner navigates by, so it is planned once and never revised — jumping back
 // to "Token bucket" has to land on the same page you left.
-export async function POST(req: Request) {
-  // Before the body is even read: an unapproved caller does not get to hand
-  // this route work, and every path past here costs money.
-  const gate = await requireApproved()
-  if (!gate.ok) return gate.response
-
+export const POST = withGuard(ROUTE, async (req, user) => {
   const body = await readBody(req, PlanRequest)
   if (!body.ok) return body.response
   const { topic } = body.data
@@ -53,7 +52,13 @@ export async function POST(req: Request) {
     },
     messages: [{ role: "user", content: `Topic: ${topic}\n\nDesign the outline.` }],
   })
-  logUsage("plan", TEACHER_MODEL, msg.usage, Date.now() - started)
+  await recordModelUsage({
+    route: ROUTE,
+    userId: user.id,
+    model: TEACHER_MODEL,
+    usage: msg.usage,
+    ms: Date.now() - started,
+  })
 
   // A safety classifier can decline on a normal 200, and `content` is then
   // empty — without this the refusal surfaces as the generic "no plan" 502.
@@ -70,4 +75,4 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "invalid plan" }, { status: 502 })
   }
-}
+})

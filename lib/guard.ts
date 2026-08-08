@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
+import { checkLimits } from "@/lib/limits"
 
 // Who is allowed to spend this project's API budget, asked in one place.
 //
@@ -54,6 +55,46 @@ export async function requireApproved(): Promise<Gate> {
   }
 
   return { ok: true, user: { id: user.id, email: user.email, role: user.role } }
+}
+
+/**
+ * Everything a route must be true before it is allowed to spend anything, in
+ * one wrapper so that a route added later cannot quietly skip it.
+ *
+ * The order is deliberate and is cheapest-first: the session is already needed
+ * to know who to bill, the limit check is one query, and only then does the
+ * handler get to read a body or call a model. Nothing below this line is free.
+ *
+ * `route` is the name that ends up in `usage_event.route`, and the handler is
+ * handed the caller so it has something to attribute the spend to — which is
+ * what makes forgetting to record usage awkward rather than easy.
+ */
+export function withGuard(
+  route: string,
+  handler: (req: Request, user: Learner) => Promise<Response>,
+): (req: Request) => Promise<Response> {
+  return async (req: Request) => {
+    const gate = await requireApproved()
+    if (!gate.ok) return gate.response
+
+    const denial = await checkLimits(gate.user.id)
+    if (denial) {
+      console.log(
+        JSON.stringify({ at: "limit", route, user: gate.user.id, why: denial.reason }),
+      )
+      return NextResponse.json(
+        { error: denial.reason },
+        {
+          // 429 for the limit that clears on its own, 402 for the ones that do
+          // not. A client retrying a 402 is a client that will retry forever.
+          status: denial.retryable ? 429 : 402,
+          ...(denial.retryable ? { headers: { "Retry-After": "60" } } : {}),
+        },
+      )
+    }
+
+    return handler(req, gate.user)
+  }
 }
 
 /**

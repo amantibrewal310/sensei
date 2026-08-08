@@ -209,4 +209,4 @@ They unblock different work, so partial is genuinely useful — send what you ha
 | `DATABASE_URL`            | ✅ done — schema and migrations. Also unblocks lesson persistence, which is still to come.               |
 | `+ AUTH_*`, `ADMIN_EMAIL` | ✅ done — Google sign-in, the pending/approved gate, and every route refusing a caller it does not know. |
 | `+ RESEND_API_KEY`        | ✅ done — `/admin`, the approve and reject buttons, and the "someone is waiting" email.                  |
-| All of it                 | The spend cap and rate limit, which need a user to attribute cost to                                     |
+| All of it                 | ✅ done — the spend cap and rate limit, which need a user to attribute cost to.                          |

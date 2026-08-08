@@ -22,3 +22,18 @@ export type ModelId = typeof TEACHER_MODEL | typeof PANEL_MODEL
 export const PRICES: Record<ModelId, { input: number; output: number }> = {
   "claude-opus-5": { input: 5, output: 25 },
 }
+
+/**
+ * What a character of narration costs, in micros. An estimate, and labelled one.
+ *
+ * OpenAI prices this model by tokens in and *audio* tokens out, neither of which
+ * a route can know before it has the audio — but it does know how many
+ * characters it sent. At roughly $0.015 a minute and roughly 900 characters a
+ * minute of speech, that is 15,000 / 900 ≈ 17 micros per character.
+ *
+ * It is here rather than omitted because a spend cap that silently ignores one
+ * of the two vendors it is capping is not a spend cap. It is deliberately a
+ * round number on the generous side: the failure worth avoiding is a cap that
+ * under-counts, and narration is a small fraction of a lesson either way.
+ */
+export const TTS_MICROS_PER_CHAR = 17

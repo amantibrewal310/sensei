@@ -6,12 +6,16 @@ import { BOARD_SYSTEM } from "@/lib/prompts"
 import { BoardJsonSchema, BoardSchema, GRID } from "@/lib/board"
 import { PageSchema, Topic } from "@/lib/lesson"
 import { readBody, safeJson } from "@/lib/request"
-import { requireApproved } from "@/lib/guard"
-import { logUsage } from "@/lib/usage"
+import { withGuard } from "@/lib/guard"
+import { recordModelUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
 // Vercel Hobby: 10s default, 60s ceiling. See app/api/plan/route.ts.
 export const maxDuration = 60
+
+// Named once: withGuard puts it in the log line, recordUsage puts it in
+// `usage_event.route`, and the spend cap reads that column.
+const ROUTE = "board"
 
 const BoardRequest = z.object({ topic: Topic, page: PageSchema })
 
@@ -21,12 +25,7 @@ const BoardRequest = z.object({ topic: Topic, page: PageSchema })
 //
 // The slots come back as the model asked for them; `layoutBoard` on the client
 // resolves collisions and sizes them, so nothing here has to be trusted.
-export async function POST(req: Request) {
-  // Before the body is even read: an unapproved caller does not get to hand
-  // this route work, and every path past here costs money.
-  const gate = await requireApproved()
-  if (!gate.ok) return gate.response
-
+export const POST = withGuard(ROUTE, async (req, user) => {
   const body = await readBody(req, BoardRequest)
   if (!body.ok) return body.response
   const { topic, page } = body.data
@@ -62,7 +61,13 @@ export async function POST(req: Request) {
       },
     ],
   })
-  logUsage("board", TEACHER_MODEL, msg.usage, Date.now() - started)
+  await recordModelUsage({
+    route: ROUTE,
+    userId: user.id,
+    model: TEACHER_MODEL,
+    usage: msg.usage,
+    ms: Date.now() - started,
+  })
 
   if (msg.stop_reason === "refusal") {
     return NextResponse.json({ error: "page declined" }, { status: 422 })
@@ -82,4 +87,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid board" }, { status: 502 })
   }
   return NextResponse.json(board.data)
-}
+})
