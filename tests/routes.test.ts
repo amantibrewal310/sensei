@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MAX_TRANSCRIPT } from "@/lib/lesson"
+import { GLOBAL_CAP_MICROS, RATE_LIMIT, USER_CAP_MICROS } from "@/lib/limits"
+import { TTS_MICROS_PER_CHAR } from "@/lib/models"
 
 // The SDK is the only thing stubbed. Everything else — zod validation, the
 // prompt assembly, the NDJSON parser, the SSE writer — is the real code, which
@@ -25,6 +27,23 @@ const APPROVED = {
 let currentUser: Record<string, unknown> | null = APPROVED
 vi.mock("@/lib/auth", () => ({
   auth: async () => (currentUser ? { user: currentUser } : null),
+}))
+
+// The database, and only the database. `lib/limits` and `lib/usage` stay real,
+// so these tests exercise the actual cap arithmetic and the actual insert —
+// what is faked is the one thing that would otherwise need a network.
+let limitRow = { user_micros: "0", global_micros: "0", recent: 0 }
+const inserted: Record<string, unknown>[] = []
+vi.mock("@/lib/db", () => ({
+  db: {
+    execute: async () => ({ rows: [limitRow] }),
+    insert: () => ({
+      values: async (row: Record<string, unknown>) => {
+        inserted.push(row)
+      },
+    }),
+  },
+  usageEvents: {},
 }))
 
 const { POST: plan } = await import("@/app/api/plan/route")
@@ -129,6 +148,8 @@ const A_PLAN = JSON.stringify({
 beforeEach(() => {
   vi.clearAllMocks()
   currentUser = APPROVED
+  limitRow = { user_micros: "0", global_micros: "0", recent: 0 }
+  inserted.length = 0
   // logUsage writes a line per call, which is wanted in production and noise here.
   vi.spyOn(console, "log").mockImplementation(() => {})
 })
@@ -140,11 +161,18 @@ describe("the gate, on every route that spends money", () => {
   // quietly. `speak` is here for the same reason it is guarded: it is the only
   // route that bills OpenAI rather than Anthropic, which is exactly how a route
   // gets overlooked.
+  // Valid bodies, even though none of them is ever parsed — the refusal happens
+  // first, which is the property being asserted. A body that would 400 anyway
+  // would make these tests pass for the wrong reason.
   const ROUTES: [string, (req: Request) => Promise<Response>, unknown][] = [
     ["/api/plan", plan, { topic: "closures" }],
     ["/api/board", board, { topic: "closures", page: PAGE }],
-    ["/api/teach", teach, { topic: "closures", pages: [PAGE], index: 0 }],
-    ["/api/draw-panel", drawPanel, { topic: "closures", panelTitle: "A", what: "b" }],
+    [
+      "/api/teach",
+      teach,
+      { topic: "closures", pages: [PAGE], currentIndex: 0, board: BOARD },
+    ],
+    ["/api/draw-panel", drawPanel, { title: "A", what: "b" }],
     ["/api/speak", speak, { text: "hello" }],
   ]
 
@@ -161,6 +189,36 @@ describe("the gate, on every route that spends money", () => {
       currentUser = { ...APPROVED, status: "pending" }
       const res = await post(route, body)
       expect(res.status).toBe(403)
+      expect(create).not.toHaveBeenCalled()
+      expect(stream).not.toHaveBeenCalled()
+    })
+
+    it(`${name} answers 429 when the caller is over the rate limit`, async () => {
+      limitRow = { ...limitRow, recent: RATE_LIMIT }
+      const res = await post(route, body)
+      expect(res.status).toBe(429)
+      // The header is the difference between a client that backs off and one
+      // that hammers: this limit clears on its own, and says when.
+      expect(res.headers.get("Retry-After")).toBe("60")
+      expect(create).not.toHaveBeenCalled()
+      expect(stream).not.toHaveBeenCalled()
+    })
+
+    it(`${name} answers 402 when the global ceiling has tripped`, async () => {
+      limitRow = { ...limitRow, global_micros: String(GLOBAL_CAP_MICROS) }
+      const res = await post(route, body)
+      // 402, not 429: retrying changes nothing until the month does, and a
+      // client that treats this as "slow down" would retry forever.
+      expect(res.status).toBe(402)
+      expect(res.headers.get("Retry-After")).toBeNull()
+      expect(create).not.toHaveBeenCalled()
+      expect(stream).not.toHaveBeenCalled()
+    })
+
+    it(`${name} answers 402 when this caller is over their own cap`, async () => {
+      limitRow = { ...limitRow, user_micros: String(USER_CAP_MICROS) }
+      const res = await post(route, body)
+      expect(res.status).toBe(402)
       expect(create).not.toHaveBeenCalled()
       expect(stream).not.toHaveBeenCalled()
     })
@@ -365,5 +423,88 @@ describe("/api/draw-panel", () => {
     })
     expect(res.status).toBe(400)
     expect(stream).not.toHaveBeenCalled()
+  })
+})
+
+describe("what the spend cap will later read", () => {
+  // `lib/limits.ts` sums usage_event, so a call that lands no row here is a
+  // call that is free forever as far as every cap is concerned. That makes
+  // these the tests standing between the cap and a lie.
+
+  it("records a Claude call against the caller who made it", async () => {
+    replies(A_PLAN)
+    await post(plan, { topic: "rate limiting" })
+
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0]).toMatchObject({
+      route: "plan",
+      userId: "u_test",
+      model: "claude-opus-5",
+      inputTokens: USAGE.input_tokens,
+      outputTokens: USAGE.output_tokens,
+    })
+    expect(inserted[0].costMicros).toBeGreaterThan(0)
+  })
+
+  it("records a streaming call from the final message, not the deltas", async () => {
+    // The deltas carry no usage at all. Reading it means asking the SDK for the
+    // accumulated final message after the loop has finished.
+    streams("hello there")
+    // The body has to be drained first: the generator that calls the model —
+    // and then records what it cost — does not run until something reads it.
+    await frames(
+      await post(teach, {
+        topic: "closures",
+        pages: [PAGE],
+        currentIndex: 0,
+        board: BOARD,
+      }),
+    )
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0]).toMatchObject({ route: "teach", userId: "u_test" })
+    expect(inserted[0].costMicros).toBeGreaterThan(0)
+  })
+
+  it("records narration, which bills a different vendor entirely", async () => {
+    // The route most likely to be forgotten by a spend cap: it is the only one
+    // that does not call Anthropic, so it is the only one with no `usage`
+    // object to notice the absence of.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("audio", { status: 200 })),
+    )
+    const text = "a sentence of narration"
+    const res = await post(speak, { text })
+    expect(res.status).toBe(200)
+
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0]).toMatchObject({
+      route: "speak",
+      model: "gpt-4o-mini-tts",
+      costMicros: text.length * TTS_MICROS_PER_CHAR,
+      // Zero on purpose: OpenAI does not bill this per token in any unit this
+      // route can see, and inventing one would put a fiction in a column named
+      // for a fact.
+      inputTokens: 0,
+      outputTokens: 0,
+    })
+    vi.unstubAllGlobals()
+  })
+
+  it("still answers the learner when the usage insert fails", async () => {
+    // The call has already happened and been paid for. Failing the response too
+    // would cost the learner their page and refund nobody — so it is logged as
+    // an under-count and the page is served.
+    const boom = vi.spyOn(console, "log")
+    inserted.push = () => {
+      throw new Error("neon is down")
+    }
+    replies(A_PLAN)
+    const res = await post(plan, { topic: "rate limiting" })
+    expect(res.status).toBe(200)
+    expect(boom.mock.calls.some(([line]) => String(line).includes("under-count"))).toBe(
+      true,
+    )
+    inserted.push = Array.prototype.push
   })
 })

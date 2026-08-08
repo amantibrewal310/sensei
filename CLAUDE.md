@@ -31,10 +31,15 @@ are the load-bearing parts. They are tested hard and changed carefully.
   generated name, callable by anything that can guess it — so every action begins with
   `assertAdmin()` (or `requireApproved()`) and zod-parses its own arguments. "The button is only
   rendered for admins" is not a check.
-- **Every route that spends money calls `requireApproved()` first**, before it reads the body.
-  `proxy.ts` is not that check — it sees a cookie, not a session, and a Next.js edge hook is not a
-  security boundary. A new route under `app/api/` is guarded and added to the table in
-  `tests/routes.test.ts`, which is what makes forgetting show up as a failure rather than as a bill.
+- **Every route that spends money is wrapped in `withGuard(ROUTE, …)`** — approved, under the rate
+  limit, under both caps, all before the body is read. `proxy.ts` is not that check: it sees a
+  cookie, not a session, and a Next.js edge hook is not a security boundary. A new route under
+  `app/api/` is wrapped and added to the table in `tests/routes.test.ts`, which is what makes
+  forgetting show up as a failure rather than as a bill.
+- **A call that is not recorded is free forever.** `lib/limits.ts` sums `usage_event`, so every
+  model call ends in `recordModelUsage` (or `recordUsage` for narration, which OpenAI bills per
+  character rather than per token). Streaming routes read usage from `stream.finalMessage()`; the
+  deltas do not carry it.
 
 ## Commands
 
@@ -91,4 +96,11 @@ dominate: `/api/teach` is the expensive one (~$0.03 a page), `/api/draw-panel` i
 transcript is resent on every turn — see `TRANSCRIPT_WINDOW` in `lib/lesson.ts`.
 
 Cached prefixes include the `output_config.format` JSON schema, not just the system prompt. Measure
-with `count_tokens` before assuming a prompt is too short to cache.
+with `count_tokens` before assuming a prompt is too short to cache. Confirmed live: one `/api/plan`
+call reports `cache_creation_input_tokens: 752`, so the prefix does clear Opus 5's 512-token floor.
+
+The policy itself is three numbers at the top of `lib/limits.ts` — per-user monthly, global monthly,
+and calls per minute — derived from a lesson costing about a dollar with `PANEL_MODEL` on Opus.
+Change them there and nowhere else. A refusal answers **402** when it will not clear before the
+month does and **429** with `Retry-After` when it will; a client that cannot tell those apart
+retries forever.

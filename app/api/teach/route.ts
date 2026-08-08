@@ -6,14 +6,18 @@ import { TEACHER_SYSTEM } from "@/lib/prompts"
 import { BoardSchema, describeBoard } from "@/lib/board"
 import { MAX_TRANSCRIPT, PAGE_KIND, PageSchema, Topic } from "@/lib/lesson"
 import { readBody } from "@/lib/request"
-import { requireApproved } from "@/lib/guard"
-import { logUsage } from "@/lib/usage"
+import { withGuard } from "@/lib/guard"
+import { recordModelUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
 // Vercel Hobby: 10s default, 60s ceiling — and the ceiling covers the whole
 // stream, not just time-to-first-byte. This is the route most at risk of
 // exceeding it; see the timing note in docs/plans/2026-08-08-production-readiness.md.
 export const maxDuration = 60
+
+// Named once: withGuard puts it in the log line, recordUsage puts it in
+// `usage_event.route`, and the spend cap reads that column.
+const ROUTE = "teach"
 
 const TeachRequest = z
   .object({
@@ -38,12 +42,7 @@ const TeachRequest = z
     path: ["currentIndex"],
   })
 
-export async function POST(req: Request) {
-  // Before the body is even read: an unapproved caller does not get to hand
-  // this route work, and every path past here costs money.
-  const gate = await requireApproved()
-  if (!gate.ok) return gate.response
-
+export const POST = withGuard(ROUTE, async (req, user) => {
   const body = await readBody(req, TeachRequest)
   if (!body.ok) return body.response
   const { pages, currentIndex, transcript, board } = body.data
@@ -108,15 +107,16 @@ export async function POST(req: Request) {
     // went past unread. The SDK accumulates them regardless, so asking for the
     // final message after iterating costs nothing and is the only way to see
     // whether the cache_control marker above is doing anything.
-    logUsage(
-      "teach",
-      TEACHER_MODEL,
-      (await stream.finalMessage()).usage,
-      Date.now() - started,
-    )
+    await recordModelUsage({
+      route: ROUTE,
+      userId: user.id,
+      model: TEACHER_MODEL,
+      usage: (await stream.finalMessage()).usage,
+      ms: Date.now() - started,
+    })
 
     yield { event: "end", data: {} }
   }
 
   return sseResponse(gen())
-}
+})

@@ -75,7 +75,8 @@ Browser (React) ── drives the teaching loop
   └─ POST /api/speak            → narration audio for one sentence
 lib/render.ts   ── blocks → placed shapes. The only thing that picks a coordinate.
 lib/layout.ts   ── grid tracks sized to what the panels actually hold.
-lib/guard.ts    ── every route above refuses a caller who is not approved.
+lib/guard.ts    ── withGuard: approved? under the rate limit? under the caps?
+lib/limits.ts   ── the whole spending policy, in three numbers.
 Canvas (tldraw) ◄── one tldraw page per lesson page; panels are frames
 Speaker         ◄── OpenAI TTS, played back one sentence at a time
 ```
@@ -111,6 +112,7 @@ AUTH_SECRET         # signs the session cookie — npx auth secret
 AUTH_GOOGLE_ID      # Google OAuth client (Web application)
 AUTH_GOOGLE_SECRET
 ADMIN_EMAIL         # approved on sign-in; approves everyone else
+RESEND_API_KEY      # the "someone is waiting for approval" email
 ```
 
 `lib/env.ts` validates all of it at boot and names what is missing and what it was for, rather than
@@ -152,9 +154,10 @@ page taught.
   you watch being drawn wants the room; this is a desktop app on purpose, but it should say so.
 - **Nothing is persisted.** A refresh regenerates the lesson from scratch, and re-calls every model
   to do it.
-- **No spend cap yet.** Access is gated, so an unapproved account cannot spend anything — but an
-  approved one is not yet bounded. The usage logging it needs is already in place, and
-  `usage_event` is already the table it writes to.
+- **The caps are monthly and coarse.** A per-user and a global dollar cap, plus a per-minute rate
+  limit, all summed from `usage_event` — which is written _after_ a call returns, so a burst of
+  simultaneous requests can overshoot by roughly one lesson. Fine for a cost backstop, not a DoS
+  defence, and the code says so.
 - **Learners are never emailed.** Resend's shared sender only delivers to the address the account was
   opened with, so the administrator can be written to and a learner cannot. `/pending` polls itself
   instead of promising a message that would never arrive.

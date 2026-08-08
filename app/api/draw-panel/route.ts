@@ -6,12 +6,16 @@ import { PANEL_MODEL } from "@/lib/models"
 import { PANEL_SYSTEM } from "@/lib/prompts"
 import { Block, describeBlocks, dropRedundantLabel, parseBlock } from "@/lib/blocks"
 import { readBody } from "@/lib/request"
-import { requireApproved } from "@/lib/guard"
-import { logUsage } from "@/lib/usage"
+import { withGuard } from "@/lib/guard"
+import { recordModelUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
 // Vercel Hobby: 10s default, 60s ceiling. See app/api/plan/route.ts.
 export const maxDuration = 60
+
+// Named once: withGuard puts it in the log line, recordUsage puts it in
+// `usage_event.route`, and the spend cap reads that column.
+const ROUTE = "draw-panel"
 
 const DrawPanelRequest = z.object({
   title: z.string().min(1).max(200),
@@ -35,12 +39,7 @@ const DrawPanelRequest = z.object({
 // way LLMs are bad at it — so a collision packer sat downstream repairing the
 // answer, and the repairs were what you saw on the board. There is nothing to
 // repair now: a block cannot express a position, so it cannot express a bad one.
-export async function POST(req: Request) {
-  // Before the body is even read: an unapproved caller does not get to hand
-  // this route work, and every path past here costs money.
-  const gate = await requireApproved()
-  if (!gate.ok) return gate.response
-
+export const POST = withGuard(ROUTE, async (req, user) => {
   const body = await readBody(req, DrawPanelRequest)
   if (!body.ok) return body.response
   // Parsing rather than hand-checking also retires the `panelTitle` const that
@@ -91,15 +90,16 @@ export async function POST(req: Request) {
 
     // Highest-volume call in the app — one per drawing beat — so this is the
     // line that says whether the panel prompt's cache is live.
-    logUsage(
-      "draw-panel",
-      PANEL_MODEL,
-      (await stream.finalMessage()).usage,
-      Date.now() - started,
-    )
+    await recordModelUsage({
+      route: ROUTE,
+      userId: user.id,
+      model: PANEL_MODEL,
+      usage: (await stream.finalMessage()).usage,
+      ms: Date.now() - started,
+    })
 
     yield { event: "done", data: {} }
   }
 
   return sseResponse(gen())
-}
+})

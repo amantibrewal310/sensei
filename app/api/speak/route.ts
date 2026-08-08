@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { env } from "@/lib/env"
-import { TTS_MODEL, TTS_VOICE } from "@/lib/models"
+import { TTS_MICROS_PER_CHAR, TTS_MODEL, TTS_VOICE } from "@/lib/models"
 import { readBody } from "@/lib/request"
-import { requireApproved } from "@/lib/guard"
+import { withGuard } from "@/lib/guard"
+import { recordUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
 // Vercel Hobby: 10s default, 60s ceiling. Synthesis is ~1s, but the audio is
 // streamed straight through, so the ceiling covers playback start to finish.
 export const maxDuration = 60
+
+// Named once: withGuard puts it in the log line, recordUsage puts it in
+// `usage_event.route`, and the spend cap reads that column.
+const ROUTE = "speak"
 
 // One spoken sentence. The teacher is instructed to emit one or two at a time,
 // so this is generous — it exists because the field was previously unbounded and
@@ -27,16 +32,12 @@ const SpeakRequest = z.object({
 // listened for. No microphone is ever requested, so there is no barge-in — the
 // learner interrupts by typing. The audio is streamed straight through, so
 // playback can begin before the whole sentence has been synthesised.
-export async function POST(req: Request) {
-  // Before the body is even read: an unapproved caller does not get to hand
-  // this route work, and every path past here costs money.
-  const gate = await requireApproved()
-  if (!gate.ok) return gate.response
-
+export const POST = withGuard(ROUTE, async (req, user) => {
   const body = await readBody(req, SpeakRequest)
   if (!body.ok) return body.response
   const { text } = body.data
 
+  const started = Date.now()
   let res: Response
   try {
     res = await fetch("https://api.openai.com/v1/audio/speech", {
@@ -76,10 +77,31 @@ export async function POST(req: Request) {
     )
   }
 
+  // The other vendor, and the one a spend cap is most likely to forget: this
+  // route bills OpenAI rather than Anthropic, so leaving it unrecorded would
+  // make narration free as far as every cap is concerned.
+  //
+  // Recorded before the body is streamed, because the charge is incurred by the
+  // request being accepted — waiting for playback to finish would miss every
+  // sentence the learner interrupts, which is most of them at the end of a page.
+  //
+  // Token counts are zero on purpose. OpenAI does not bill this per token in
+  // any unit this route can see, so writing a number into a column named
+  // `input_tokens` would be inventing one. The estimate lives in `cost_micros`,
+  // derived from character count — see TTS_MICROS_PER_CHAR.
+  await recordUsage({
+    route: ROUTE,
+    userId: user.id,
+    model: TTS_MODEL,
+    usage: { input_tokens: 0, output_tokens: 0 },
+    ms: Date.now() - started,
+    micros: text.length * TTS_MICROS_PER_CHAR,
+  })
+
   return new Response(res.body, {
     headers: {
       "Content-Type": "audio/mpeg",
       "Cache-Control": "no-store",
     },
   })
-}
+})
