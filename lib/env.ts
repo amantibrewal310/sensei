@@ -14,6 +14,10 @@ import { z } from "zod"
 const EnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1),
   OPENAI_API_KEY: z.string().min(1),
+  // The pooled Neon URL — the one whose host contains "-pooler". Migrations use
+  // DATABASE_URL_UNPOOLED instead, but drizzle-kit reads that from .env.local
+  // itself and never runs inside the app, so it is not validated here.
+  DATABASE_URL: z.string().min(1).startsWith("postgres"),
 })
 
 export type Env = z.infer<typeof EnvSchema>
@@ -22,6 +26,7 @@ export type Env = z.infer<typeof EnvSchema>
 const PURPOSE: Record<keyof Env, string> = {
   ANTHROPIC_API_KEY: "planning, teaching, and panel layout",
   OPENAI_API_KEY: "narration (text-to-speech)",
+  DATABASE_URL: "accounts, approvals, and the spend cap",
 }
 
 function load(): Env {

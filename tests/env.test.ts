@@ -3,7 +3,19 @@ import { describe, expect, it, vi } from "vitest"
 // `lib/env` validates at module scope, which is the point of it — so every case
 // here needs a fresh module registry and a process.env set up before the
 // import, not after.
-const MANAGED = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "SKIP_ENV_VALIDATION"] as const
+const MANAGED = [
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "DATABASE_URL",
+  "SKIP_ENV_VALIDATION",
+] as const
+
+/** Enough to satisfy the schema, so a case can be about one variable. */
+const ALL = {
+  ANTHROPIC_API_KEY: "sk-ant-test",
+  OPENAI_API_KEY: "sk-openai-test",
+  DATABASE_URL: "postgresql://u:p@host.neon.tech/neondb?sslmode=require",
+}
 
 async function importEnv(vars: Partial<Record<string, string>>) {
   const saved = Object.fromEntries(MANAGED.map((k) => [k, process.env[k]]))
@@ -24,19 +36,17 @@ async function importEnv(vars: Partial<Record<string, string>>) {
 }
 
 describe("env", () => {
-  it("reads the keys when both are set", async () => {
-    const { env } = await importEnv({
-      ANTHROPIC_API_KEY: "sk-ant-test",
-      OPENAI_API_KEY: "sk-openai-test",
-    })
-    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test")
-    expect(env.OPENAI_API_KEY).toBe("sk-openai-test")
+  it("reads every variable when they are all set", async () => {
+    const { env } = await importEnv(ALL)
+    expect(env.ANTHROPIC_API_KEY).toBe(ALL.ANTHROPIC_API_KEY)
+    expect(env.OPENAI_API_KEY).toBe(ALL.OPENAI_API_KEY)
+    expect(env.DATABASE_URL).toBe(ALL.DATABASE_URL)
   })
 
   it("names the variable that is missing", async () => {
     // The whole point: the old code sent `Bearer undefined` to OpenAI and came
     // back with a 401 that mentioned neither the variable nor that it was unset.
-    await expect(importEnv({ ANTHROPIC_API_KEY: "sk-ant-test" })).rejects.toThrow(
+    await expect(importEnv({ ...ALL, OPENAI_API_KEY: undefined })).rejects.toThrow(
       /OPENAI_API_KEY/,
     )
   })
@@ -49,9 +59,18 @@ describe("env", () => {
   })
 
   it("rejects a key set to empty rather than treating it as present", async () => {
+    await expect(importEnv({ ...ALL, ANTHROPIC_API_KEY: "" })).rejects.toThrow(
+      /ANTHROPIC_API_KEY/,
+    )
+  })
+
+  it("rejects a DATABASE_URL that is not a postgres URL", async () => {
+    // The mistake this catches is copying the wrong field out of the Neon
+    // console — the dashboard also shows a psql command and a plain hostname,
+    // and neither of them connects.
     await expect(
-      importEnv({ ANTHROPIC_API_KEY: "", OPENAI_API_KEY: "sk-openai-test" }),
-    ).rejects.toThrow(/ANTHROPIC_API_KEY/)
+      importEnv({ ...ALL, DATABASE_URL: "ep-quiet-grass.us-east-2.aws.neon.tech" }),
+    ).rejects.toThrow(/DATABASE_URL/)
   })
 
   it("skips validation for builds, which have no secrets", async () => {

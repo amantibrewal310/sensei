@@ -1,3 +1,9 @@
 .next
 node_modules
 package-lock.json
+
+# Plan documents are prose, and one of them is deliberately untracked. Running
+# a formatter over them churns wording for no reader and, when a plan is not
+# committed, makes `format:check` disagree between a laptop and CI — which is
+# exactly how this file's absence turned CI red.
+docs/plans
