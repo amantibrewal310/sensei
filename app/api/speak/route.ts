@@ -31,23 +31,37 @@ export async function POST(req: Request) {
   if (!body.ok) return body.response
   const { text } = body.data
 
-  const res = await fetch("https://api.openai.com/v1/audio/speech", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: TTS_MODEL,
-      voice: TTS_VOICE,
-      input: text,
-      response_format: "mp3",
-      instructions:
-        "You are a warm, curious teacher explaining an idea at a whiteboard. " +
-        "Speak in English. Unhurried and clear, with the natural emphasis of " +
-        "someone who finds this genuinely interesting.",
-    }),
-  })
+  let res: Response
+  try {
+    res = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      // The learner interrupts several sentences ahead of the voice, so this
+      // request is routinely abandoned by the browser while it is still open.
+      // Without the signal the function stays alive streaming audio to nobody —
+      // and on Hobby, function duration is the thing being spent.
+      signal: req.signal,
+      headers: {
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: TTS_MODEL,
+        voice: TTS_VOICE,
+        input: text,
+        response_format: "mp3",
+        instructions:
+          "You are a warm, curious teacher explaining an idea at a whiteboard. " +
+          "Speak in English. Unhurried and clear, with the natural emphasis of " +
+          "someone who finds this genuinely interesting.",
+      }),
+    })
+  } catch {
+    // Aborted, or the upstream is unreachable. Either way nothing here should
+    // throw out of the handler: in the common case the client that asked for
+    // this audio has already gone, and the narrator treats any failure as
+    // silence anyway.
+    return new Response(null, { status: 499 })
+  }
 
   if (!res.ok || !res.body) {
     return NextResponse.json(
