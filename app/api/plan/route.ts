@@ -4,6 +4,7 @@ import { anthropic } from "@/lib/anthropic"
 import { TEACHER_MODEL } from "@/lib/models"
 import { PLAN_SYSTEM, PlanJsonSchema, Topic, parsePlan } from "@/lib/lesson"
 import { readBody, safeJson } from "@/lib/request"
+import { requireApproved } from "@/lib/guard"
 import { logUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
@@ -18,6 +19,11 @@ const PlanRequest = z.object({ topic: Topic })
 // learner navigates by, so it is planned once and never revised — jumping back
 // to "Token bucket" has to land on the same page you left.
 export async function POST(req: Request) {
+  // Before the body is even read: an unapproved caller does not get to hand
+  // this route work, and every path past here costs money.
+  const gate = await requireApproved()
+  if (!gate.ok) return gate.response
+
   const body = await readBody(req, PlanRequest)
   if (!body.ok) return body.response
   const { topic } = body.data

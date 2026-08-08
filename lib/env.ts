@@ -18,6 +18,19 @@ const EnvSchema = z.object({
   // DATABASE_URL_UNPOOLED instead, but drizzle-kit reads that from .env.local
   // itself and never runs inside the app, so it is not validated here.
   DATABASE_URL: z.string().min(1).startsWith("postgres"),
+  // Signs the session cookie. `npx auth secret` emits 44 base64 characters; the
+  // bound is here because a short hand-typed value is the one mistake that
+  // produces no error at all — just sessions that are trivially forgeable.
+  AUTH_SECRET: z.string().min(32),
+  // Google's own documented format. The console shows several long strings on
+  // the same screen and only this one ends in the suffix, so checking it turns
+  // "pasted the project number" into a boot failure that says which field.
+  AUTH_GOOGLE_ID: z.string().endsWith(".apps.googleusercontent.com"),
+  AUTH_GOOGLE_SECRET: z.string().min(10),
+  // Who gets in without waiting for approval, matched on the address Google
+  // returns. Checked on every sign-in rather than only at account creation —
+  // see the `signIn` event in lib/auth.ts for why that difference matters.
+  ADMIN_EMAIL: z.email(),
 })
 
 export type Env = z.infer<typeof EnvSchema>
@@ -27,6 +40,10 @@ const PURPOSE: Record<keyof Env, string> = {
   ANTHROPIC_API_KEY: "planning, teaching, and panel layout",
   OPENAI_API_KEY: "narration (text-to-speech)",
   DATABASE_URL: "accounts, approvals, and the spend cap",
+  AUTH_SECRET: "signing the session cookie — `npx auth secret`",
+  AUTH_GOOGLE_ID: "the Google sign-in button — see docs/setup.md §3",
+  AUTH_GOOGLE_SECRET: "the Google sign-in button — see docs/setup.md §3",
+  ADMIN_EMAIL: "the account that approves everyone else",
 }
 
 function load(): Env {

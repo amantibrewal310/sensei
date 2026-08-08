@@ -112,6 +112,13 @@ _Google Auth Platform → Branding_).
 Create, then copy the client ID and client secret into `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET`.
 The secret is shown once; if you lose it, make a new one rather than hunting.
 
+> Google also offers the whole thing as a JSON download, named
+> `client_secret_<id>.apps.googleusercontent.com.json`. It contains the secret in plain text, and a
+> browser will save it wherever it last saved anything — which is often the repo. Copy the two
+> values out and keep the file somewhere outside the project (`~/.config/sensei/` does fine).
+> `client_secret_*.json` is in `.gitignore` so that a copy landing here cannot be committed, but
+> the pattern is a backstop, not a plan.
+
 > A trailing slash, `http` where it should be `https`, or a missing `/api/auth/callback/google` all
 > produce the same `redirect_uri_mismatch` error page. It names the URI it was sent — paste that
 > string into the console rather than retyping it.
@@ -134,6 +141,14 @@ has ever been on a laptop is not a production secret.
    waiting. Verifying a domain matters when you email strangers, and this never does.
 3. Set `ADMIN_EMAIL` to the address that should get those emails and be allowed into `/admin`.
 
+> **It has to be an account you can sign in to Google with.** It is compared against the address
+> Google returns (case-insensitively), and it is the only thing that creates the first approved
+> account — everyone else waits for that account to let them in. Set it to an address you cannot
+> sign in as and the app has no administrator, with nothing anywhere saying so.
+>
+> Getting it wrong is recoverable: the check runs on every sign-in, not only when the account is
+> created, so fixing the variable and signing in again promotes you.
+
 ---
 
 ## Check it
@@ -142,9 +157,20 @@ has ever been on a laptop is not a production secret.
 npm run dev
 ```
 
-The lesson should still teach — none of the new variables are read yet, so a wrong value here cannot
-break what already works. That is deliberate: each one starts being validated in `lib/env.ts` only
-when the code that needs it lands.
+Open <http://localhost:3000/learn?topic=anything>. Signed out, you should be bounced to `/login`
+with the topic still in the URL — coming back to what you typed is the point of that parameter.
+Sign in as `ADMIN_EMAIL` and you land on the lesson; sign in as anything else and you land on
+`/pending`, which is what an interviewer sees until you approve them.
+
+The API routes refuse independently of any of that:
+
+```bash
+curl -s -X POST localhost:3000/api/plan -H 'content-type: application/json' -d '{"topic":"x"}'
+# {"error":"Sign in to continue."}
+```
+
+That refusal comes from the route itself, not from the redirect — `proxy.ts` only saves a
+signed-out visitor a wasted page load, and is not what stops anyone spending your API budget.
 
 ## The finished file
 
@@ -169,9 +195,9 @@ deployed app, with `AUTH_SECRET` differing between the two.
 
 They unblock different work, so partial is genuinely useful — send what you have.
 
-| You have             | I can build                                                                                                                                               |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL` alone | The schema and migrations, and **lesson persistence** — a pre-generated lesson that replays with zero model calls. The most demo-proof thing on the list. |
-| `+ AUTH_*`           | Google sign-in, the pending/approved gate, middleware                                                                                                     |
-| `+ RESEND_API_KEY`   | The admin approval page and the "someone is waiting" email                                                                                                |
-| All of it            | The spend cap and rate limit, which need a user to attribute cost to                                                                                      |
+| You have                  | What it unblocks                                                                                         |
+| ------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`            | ✅ done — schema and migrations. Also unblocks lesson persistence, which is still to come.               |
+| `+ AUTH_*`, `ADMIN_EMAIL` | ✅ done — Google sign-in, the pending/approved gate, and every route refusing a caller it does not know. |
+| `+ RESEND_API_KEY`        | The admin approval page and the "someone is waiting" email                                               |
+| All of it                 | The spend cap and rate limit, which need a user to attribute cost to                                     |

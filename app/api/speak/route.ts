@@ -3,6 +3,7 @@ import { z } from "zod"
 import { env } from "@/lib/env"
 import { TTS_MODEL, TTS_VOICE } from "@/lib/models"
 import { readBody } from "@/lib/request"
+import { requireApproved } from "@/lib/guard"
 
 export const runtime = "nodejs"
 // Vercel Hobby: 10s default, 60s ceiling. Synthesis is ~1s, but the audio is
@@ -27,6 +28,11 @@ const SpeakRequest = z.object({
 // learner interrupts by typing. The audio is streamed straight through, so
 // playback can begin before the whole sentence has been synthesised.
 export async function POST(req: Request) {
+  // Before the body is even read: an unapproved caller does not get to hand
+  // this route work, and every path past here costs money.
+  const gate = await requireApproved()
+  if (!gate.ok) return gate.response
+
   const body = await readBody(req, SpeakRequest)
   if (!body.ok) return body.response
   const { text } = body.data

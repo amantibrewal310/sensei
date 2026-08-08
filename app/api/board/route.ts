@@ -6,6 +6,7 @@ import { BOARD_SYSTEM } from "@/lib/prompts"
 import { BoardJsonSchema, BoardSchema, GRID } from "@/lib/board"
 import { PageSchema, Topic } from "@/lib/lesson"
 import { readBody, safeJson } from "@/lib/request"
+import { requireApproved } from "@/lib/guard"
 import { logUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
@@ -21,6 +22,11 @@ const BoardRequest = z.object({ topic: Topic, page: PageSchema })
 // The slots come back as the model asked for them; `layoutBoard` on the client
 // resolves collisions and sizes them, so nothing here has to be trusted.
 export async function POST(req: Request) {
+  // Before the body is even read: an unapproved caller does not get to hand
+  // this route work, and every path past here costs money.
+  const gate = await requireApproved()
+  if (!gate.ok) return gate.response
+
   const body = await readBody(req, BoardRequest)
   if (!body.ok) return body.response
   const { topic, page } = body.data

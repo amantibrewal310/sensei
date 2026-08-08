@@ -75,6 +75,7 @@ Browser (React) ── drives the teaching loop
   └─ POST /api/speak            → narration audio for one sentence
 lib/render.ts   ── blocks → placed shapes. The only thing that picks a coordinate.
 lib/layout.ts   ── grid tracks sized to what the panels actually hold.
+lib/guard.ts    ── every route above refuses a caller who is not approved.
 Canvas (tldraw) ◄── one tldraw page per lesson page; panels are frames
 Speaker         ◄── OpenAI TTS, played back one sentence at a time
 ```
@@ -86,6 +87,10 @@ Speaker         ◄── OpenAI TTS, played back one sentence at a time
   spill onto its neighbour; shape ids are derived from where they belong, so a panel can grow and be
   re-placed without the board flickering.
 - **Narration:** OpenAI text-to-speech, synthesised a few beats ahead of when it is due.
+- **Access:** Google sign-in (Auth.js) over Neon Postgres. Signing in is not being let in — a new
+  account lands as `pending` and an administrator approves it, because every route past that point
+  spends money. Sessions live in the database rather than in a JWT, so an approval takes effect on
+  the next page load instead of on the next sign-out.
 
 Used under the tldraw SDK license, which requires the "Made with tldraw" watermark to remain on the
 canvas.
@@ -101,7 +106,16 @@ npm run dev                        # http://localhost:3000
 ```
 ANTHROPIC_API_KEY   # planning, teaching, and layout
 OPENAI_API_KEY      # narration (text-to-speech)
+DATABASE_URL        # Neon Postgres — accounts, approvals, spend
+AUTH_SECRET         # signs the session cookie — npx auth secret
+AUTH_GOOGLE_ID      # Google OAuth client (Web application)
+AUTH_GOOGLE_SECRET
+ADMIN_EMAIL         # approved on sign-in; approves everyone else
 ```
+
+`lib/env.ts` validates all of it at boot and names what is missing and what it was for, rather than
+letting an unset key surface later as somebody else's 401. Full walkthrough of where each value
+comes from: [`docs/setup.md`](docs/setup.md).
 
 Voice is **output only**. The app never requests microphone access and there is no barge-in — you
 interrupt by typing, which cuts the narration off mid-sentence. There is no "enable voice" switch:
@@ -138,7 +152,11 @@ page taught.
   you watch being drawn wants the room; this is a desktop app on purpose, but it should say so.
 - **Nothing is persisted.** A refresh regenerates the lesson from scratch, and re-calls every model
   to do it.
-- **No auth, no spend cap.** Both are next; the usage logging they need is already in place.
+- **No spend cap yet.** Access is gated, so an unapproved account cannot spend anything — but an
+  approved one is not yet bounded. The usage logging it needs is already in place, and
+  `usage_event` is already the table it writes to.
+- **Approvals are a database update.** The admin page and the "someone is waiting" email are next;
+  until then a pending account is approved with SQL.
 
 ## License
 

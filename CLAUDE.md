@@ -27,6 +27,10 @@ are the load-bearing parts. They are tested hard and changed carefully.
   means adding a model without pricing it fails to compile.
 - **A failure the user cannot see is worse than one they can.** Routes answer `{error}`; the client
   shows it. Never mark a page taught on a path that did not teach it.
+- **Every route that spends money calls `requireApproved()` first**, before it reads the body.
+  `proxy.ts` is not that check — it sees a cookie, not a session, and a Next.js edge hook is not a
+  security boundary. A new route under `app/api/` is guarded and added to the table in
+  `tests/routes.test.ts`, which is what makes forgetting show up as a failure rather than as a bill.
 
 ## Commands
 
@@ -48,12 +52,24 @@ schema is readable, and pushing skips writing it down.
 
 CI runs typecheck, lint, format:check, test and build on every push.
 
+## Auth
+
+Google is the only provider, and it says who someone is, not whether they may spend anything —
+`status` starts at `pending` and an admin moves it. `ADMIN_EMAIL` is checked on **every** sign-in
+rather than only at account creation, so pointing it at the wrong address is a recoverable mistake
+instead of an app with no administrator in it. Seeding an admin row in a migration does not work at
+all: Auth.js refuses to link a Google account to a pre-existing row by email
+(`OAuthAccountNotLinked`).
+
+Sessions are in the database, not a JWT. It costs a query per request and it is why an approval
+reaches someone on their next page load instead of their next sign-out.
+
 ## Testing
 
-Geometry is tested as pure functions. Routes are tested with **only the Anthropic SDK stubbed**, so
-zod, the NDJSON parser and the SSE writer are all real. The session hook is tested under jsdom with
-a teaching stream held open by hand, because the generation counter — a turn being superseded
-mid-sentence — is the subtlest thing in the app and has had a bug before.
+Geometry is tested as pure functions. Routes are tested with **only the Anthropic SDK and `auth`
+stubbed**, so zod, the NDJSON parser, the SSE writer and the real guard all run. The session hook is
+tested under jsdom with a teaching stream held open by hand, because the generation counter — a turn
+being superseded mid-sentence — is the subtlest thing in the app and has had a bug before.
 
 When adding a test, check it can fail: break the line it covers and watch it go red.
 

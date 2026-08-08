@@ -7,6 +7,10 @@ const MANAGED = [
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "DATABASE_URL",
+  "AUTH_SECRET",
+  "AUTH_GOOGLE_ID",
+  "AUTH_GOOGLE_SECRET",
+  "ADMIN_EMAIL",
   "SKIP_ENV_VALIDATION",
 ] as const
 
@@ -15,6 +19,10 @@ const ALL = {
   ANTHROPIC_API_KEY: "sk-ant-test",
   OPENAI_API_KEY: "sk-openai-test",
   DATABASE_URL: "postgresql://u:p@host.neon.tech/neondb?sslmode=require",
+  AUTH_SECRET: "a-secret-long-enough-to-clear-the-32-character-minimum",
+  AUTH_GOOGLE_ID: "1234.apps.googleusercontent.com",
+  AUTH_GOOGLE_SECRET: "GOCSPX-test-secret",
+  ADMIN_EMAIL: "admin@example.com",
 }
 
 async function importEnv(vars: Partial<Record<string, string>>) {
@@ -71,6 +79,31 @@ describe("env", () => {
     await expect(
       importEnv({ ...ALL, DATABASE_URL: "ep-quiet-grass.us-east-2.aws.neon.tech" }),
     ).rejects.toThrow(/DATABASE_URL/)
+  })
+
+  it("rejects an AUTH_GOOGLE_ID that is not a Google client id", async () => {
+    // The Google console shows a project number, a client id and a secret on
+    // one screen, and only the client id ends in this suffix. Pasting the
+    // project number otherwise fails much later, as a redirect loop.
+    await expect(importEnv({ ...ALL, AUTH_GOOGLE_ID: "47267730759" })).rejects.toThrow(
+      /AUTH_GOOGLE_ID/,
+    )
+  })
+
+  it("rejects a hand-typed AUTH_SECRET that is too short to be one", async () => {
+    // The only mistake here that produces no error of its own: sessions still
+    // sign, they are just cheap to forge.
+    await expect(importEnv({ ...ALL, AUTH_SECRET: "secret" })).rejects.toThrow(
+      /AUTH_SECRET/,
+    )
+  })
+
+  it("rejects an ADMIN_EMAIL that is not an address", async () => {
+    // It is compared against what Google returns; a value that cannot be an
+    // email matches nobody, and the symptom is an app with no admin in it.
+    await expect(importEnv({ ...ALL, ADMIN_EMAIL: "admin" })).rejects.toThrow(
+      /ADMIN_EMAIL/,
+    )
   })
 
   it("skips validation for builds, which have no secrets", async () => {

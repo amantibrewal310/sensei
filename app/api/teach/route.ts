@@ -6,6 +6,7 @@ import { TEACHER_SYSTEM } from "@/lib/prompts"
 import { BoardSchema, describeBoard } from "@/lib/board"
 import { MAX_TRANSCRIPT, PAGE_KIND, PageSchema, Topic } from "@/lib/lesson"
 import { readBody } from "@/lib/request"
+import { requireApproved } from "@/lib/guard"
 import { logUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
@@ -38,6 +39,11 @@ const TeachRequest = z
   })
 
 export async function POST(req: Request) {
+  // Before the body is even read: an unapproved caller does not get to hand
+  // this route work, and every path past here costs money.
+  const gate = await requireApproved()
+  if (!gate.ok) return gate.response
+
   const body = await readBody(req, TeachRequest)
   if (!body.ok) return body.response
   const { pages, currentIndex, transcript, board } = body.data

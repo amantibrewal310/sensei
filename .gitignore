@@ -14,6 +14,13 @@
 .env*
 !.env*.example
 
+# Google hands you the OAuth client as a download with this exact name shape,
+# and a browser drops it wherever you point it. It contains client_secret in
+# plain text, so the pattern is here rather than trusting you to notice it in
+# `git status` — the credentials belong in .env.local, and the file itself
+# belongs outside the repo.
+client_secret_*.json
+
 # misc
 .DS_Store
 *.pem
