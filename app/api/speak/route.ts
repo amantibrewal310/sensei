@@ -5,6 +5,9 @@ import { TTS_MODEL, TTS_VOICE } from "@/lib/models"
 import { readBody } from "@/lib/request"
 
 export const runtime = "nodejs"
+// Vercel Hobby: 10s default, 60s ceiling. Synthesis is ~1s, but the audio is
+// streamed straight through, so the ceiling covers playback start to finish.
+export const maxDuration = 60
 
 // One spoken sentence. The teacher is instructed to emit one or two at a time,
 // so this is generous — it exists because the field was previously unbounded and

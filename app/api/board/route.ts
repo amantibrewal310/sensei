@@ -6,8 +6,11 @@ import { BOARD_SYSTEM } from "@/lib/prompts"
 import { BoardJsonSchema, BoardSchema, GRID } from "@/lib/board"
 import { PageSchema, Topic } from "@/lib/lesson"
 import { readBody, safeJson } from "@/lib/request"
+import { logUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
+// Vercel Hobby: 10s default, 60s ceiling. See app/api/plan/route.ts.
+export const maxDuration = 60
 
 const BoardRequest = z.object({ topic: Topic, page: PageSchema })
 
@@ -22,10 +25,23 @@ export async function POST(req: Request) {
   if (!body.ok) return body.response
   const { topic, page } = body.data
 
+  const started = Date.now()
   const msg = await anthropic.messages.create({
     model: TEACHER_MODEL,
-    max_tokens: 2000,
-    system: BOARD_SYSTEM,
+    // Thinking is on by default on this model, and max_tokens covers thinking
+    // plus response text. See app/api/plan/route.ts.
+    max_tokens: 6000,
+    thinking: { type: "adaptive" },
+    // Cached: measured at 1171 tokens with the JSON schema included, and this
+    // route runs once per page. The prefix is byte-stable — the only
+    // interpolations are GRID.cols and GRID.rows, both module constants.
+    system: [
+      {
+        type: "text",
+        text: BOARD_SYSTEM,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     output_config: {
       format: { type: "json_schema", schema: BoardJsonSchema },
     },
@@ -40,6 +56,11 @@ export async function POST(req: Request) {
       },
     ],
   })
+  logUsage("board", TEACHER_MODEL, msg.usage, Date.now() - started)
+
+  if (msg.stop_reason === "refusal") {
+    return NextResponse.json({ error: "page declined" }, { status: 422 })
+  }
 
   const text = msg.content.find((b) => b.type === "text")
   if (!text || text.type !== "text") {
