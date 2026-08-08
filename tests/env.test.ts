@@ -3,11 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 // `lib/env` validates at module scope, which is the point of it — so every case
 // here needs a fresh module registry and a process.env set up before the
 // import, not after.
-const MANAGED = [
-  "ANTHROPIC_API_KEY",
-  "OPENAI_API_KEY",
-  "SKIP_ENV_VALIDATION",
-] as const
+const MANAGED = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "SKIP_ENV_VALIDATION"] as const
 
 async function importEnv(vars: Partial<Record<string, string>>) {
   const saved = Object.fromEntries(MANAGED.map((k) => [k, process.env[k]]))
@@ -40,9 +36,9 @@ describe("env", () => {
   it("names the variable that is missing", async () => {
     // The whole point: the old code sent `Bearer undefined` to OpenAI and came
     // back with a 401 that mentioned neither the variable nor that it was unset.
-    await expect(
-      importEnv({ ANTHROPIC_API_KEY: "sk-ant-test" }),
-    ).rejects.toThrow(/OPENAI_API_KEY/)
+    await expect(importEnv({ ANTHROPIC_API_KEY: "sk-ant-test" })).rejects.toThrow(
+      /OPENAI_API_KEY/,
+    )
   })
 
   it("names every missing variable at once, not just the first", async () => {

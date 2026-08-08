@@ -79,15 +79,33 @@ const PAGE = {
 
 const BOARD = {
   panels: [
-    { id: "bucket", title: "The bucket", col: 0, row: 0, colSpan: 1, rowSpan: 1, note: "" },
+    {
+      id: "bucket",
+      title: "The bucket",
+      col: 0,
+      row: 0,
+      colSpan: 1,
+      rowSpan: 1,
+      note: "",
+    },
   ],
   connectors: [],
 }
 
 const A_PLAN = JSON.stringify({
   pages: [
-    { title: "Why limit", summary: "the problem", question: "what breaks?", kind: "concept" },
-    { title: "Token bucket", summary: "the mechanism", question: "how?", kind: "algorithm" },
+    {
+      title: "Why limit",
+      summary: "the problem",
+      question: "what breaks?",
+      kind: "concept",
+    },
+    {
+      title: "Token bucket",
+      summary: "the mechanism",
+      question: "how?",
+      kind: "algorithm",
+    },
   ],
 })
 
@@ -115,7 +133,11 @@ describe("/api/plan", () => {
   it("answers 502 when the plan is JSON but the wrong shape", async () => {
     // One page: `RawPlan` requires two. A lesson of one page is not a lesson,
     // and this is the case a `as Plan` cast would have let straight through.
-    replies(JSON.stringify({ pages: [{ title: "T", summary: "s", question: "q", kind: "concept" }] }))
+    replies(
+      JSON.stringify({
+        pages: [{ title: "T", summary: "s", question: "q", kind: "concept" }],
+      }),
+    )
     const res = await post(plan, { topic: "rate limiting" })
     expect(res.status).toBe(502)
   })
@@ -195,8 +217,12 @@ describe("/api/teach", () => {
     const got = await frames(await post(teach, body))
 
     expect(got.map((f) => f.event)).toEqual(["text", "text", "end"])
-    expect(got.filter((f) => f.event === "text").map((f) => JSON.parse(f.data).delta).join(""))
-      .toBe('{"type":"speak","text":"Hello."}\n{"type":"done"}\n')
+    expect(
+      got
+        .filter((f) => f.event === "text")
+        .map((f) => JSON.parse(f.data).delta)
+        .join(""),
+    ).toBe('{"type":"speak","text":"Hello."}\n{"type":"done"}\n')
   })
 
   it("turns a mid-stream failure into an error frame, not a truncated lesson", async () => {
@@ -204,7 +230,10 @@ describe("/api/teach", () => {
     // and says so; before it existed, the page was left half-taught in silence.
     stream.mockReturnValue({
       async *[Symbol.asyncIterator]() {
-        yield { type: "content_block_delta", delta: { type: "text_delta", text: '{"type":"speak"' } }
+        yield {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: '{"type":"speak"' },
+        }
         throw new Error("upstream went away")
       },
       finalMessage: async () => ({ usage: USAGE }),
@@ -238,7 +267,12 @@ describe("/api/teach", () => {
 })
 
 describe("/api/draw-panel", () => {
-  const body = { title: "The bucket", note: "", what: "the bucket holding tokens", existing: [] }
+  const body = {
+    title: "The bucket",
+    note: "",
+    what: "the bucket holding tokens",
+    existing: [],
+  }
 
   it("emits one frame per block", async () => {
     streams(
@@ -263,7 +297,9 @@ describe("/api/draw-panel", () => {
   })
 
   it("drops a stack heading that only repeats the panel title", async () => {
-    streams('{"kind":"stack","label":"The Bucket","items":[{"text":"token","color":"black"}]}\n')
+    streams(
+      '{"kind":"stack","label":"The Bucket","items":[{"text":"token","color":"black"}]}\n',
+    )
     const got = await frames(await post(drawPanel, body))
     expect(JSON.parse(got[0].data).label).toBeUndefined()
   })
@@ -271,7 +307,10 @@ describe("/api/draw-panel", () => {
   it("rejects existing content that is not blocks", async () => {
     // `existing` is stringified into the prompt, so anything accepted here is
     // something a caller got to put in front of the model.
-    const res = await post(drawPanel, { ...body, existing: [{ kind: "sql", text: "drop" }] })
+    const res = await post(drawPanel, {
+      ...body,
+      existing: [{ kind: "sql", text: "drop" }],
+    })
     expect(res.status).toBe(400)
     expect(stream).not.toHaveBeenCalled()
   })

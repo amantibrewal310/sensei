@@ -143,8 +143,7 @@ function renderLines(items: Item[], sizes: Size[], lines: Line[]): Rendered {
  */
 function renderFlow(items: Item[], avail: number): Rendered {
   const sizes = items.map(itemSize)
-  const across =
-    sizes.reduce((n, s) => n + s.w, 0) + ARROW_LEN * (items.length - 1)
+  const across = sizes.reduce((n, s) => n + s.w, 0) + ARROW_LEN * (items.length - 1)
 
   if (across <= avail) {
     const h = Math.max(...sizes.map((s) => s.h))
@@ -215,11 +214,7 @@ function stackedBoxes(
 }
 
 /** A container with things inside it — a stack, a queue, a bucket. */
-function renderStack(
-  label: string | undefined,
-  items: Item[],
-  avail: number,
-): Rendered {
+function renderStack(label: string | undefined, items: Item[], avail: number): Rendered {
   // `itemSize` has already floored each width at MIN_BOX_W, so flooring the
   // maximum again only suggests it might not have.
   const inner = Math.min(
@@ -281,7 +276,9 @@ function renderTree(root: Item, children: Item[], avail: number): Rendered {
   const kidsX = (w - kids.w) / 2
   const kidsY = rootSize.h + ARROW_LEN
 
-  const shapes: PanelShape[] = [boxAt(root, (w - rootSize.w) / 2, 0, rootSize.w, rootSize.h)]
+  const shapes: PanelShape[] = [
+    boxAt(root, (w - rootSize.w) / 2, 0, rootSize.w, rootSize.h),
+  ]
   shapes.push(...shift(kids.shapes, kidsX, kidsY))
 
   // Arrows come last so they never point at a box that hasn't appeared yet.
@@ -458,11 +455,7 @@ function placeBlocks(blocks: Block[]): {
     let y = PANEL_PAD
     for (const i of column) {
       const block = rendered[i]
-      perBlock[i] = shift(
-        block.shapes,
-        columnX + Math.max(0, (colW - block.w) / 2),
-        y,
-      )
+      perBlock[i] = shift(block.shapes, columnX + Math.max(0, (colW - block.w) / 2), y)
       y += block.h + BLOCK_GAP
     }
     height = Math.max(height, y - BLOCK_GAP + PANEL_PAD)
@@ -516,10 +509,7 @@ export function naturalPanelSize(blocks: Block[]): {
   const { columns, colW, height } = placeBlocks(blocks)
   const width = Math.min(
     MAX_PANEL_W,
-    Math.max(
-      MIN_PANEL_W,
-      columns * colW + (columns - 1) * COL_GAP + 2 * PANEL_PAD,
-    ),
+    Math.max(MIN_PANEL_W, columns * colW + (columns - 1) * COL_GAP + 2 * PANEL_PAD),
   )
   return { width, height }
 }

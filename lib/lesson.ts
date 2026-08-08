@@ -91,10 +91,7 @@ export const PageSchema = z.object({
 const MUST_SHOW_CODE =
   'THIS PAGE MUST SHOW CODE. Emit exactly one "code" line for this page\'s core check — the thing the algorithm actually does per request. Say what it does in the sentence before it. It appears in a pane beside the board, so it does not compete with the diagram for room.'
 
-export const PAGE_KIND: Record<
-  PageKind,
-  { badge?: string; teachingRule?: string }
-> = {
+export const PAGE_KIND: Record<PageKind, { badge?: string; teachingRule?: string }> = {
   concept: {},
   recap: {},
   algorithm: { badge: "algorithm", teachingRule: MUST_SHOW_CODE },

@@ -21,9 +21,7 @@ export function sseResponse(gen: AsyncGenerator<Frame>): Response {
       try {
         for await (const { event, data } of gen) {
           controller.enqueue(
-            encoder.encode(
-              `${EVENT}${event}\n${DATA}${JSON.stringify(data)}\n\n`,
-            ),
+            encoder.encode(`${EVENT}${event}\n${DATA}${JSON.stringify(data)}\n\n`),
           )
         }
       } catch (err) {

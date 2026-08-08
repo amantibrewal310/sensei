@@ -65,7 +65,11 @@ export function describeBlocks(blocks: Block[]): string {
   return blocks.map((b) => JSON.stringify(b)).join("\n")
 }
 
-const normalise = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ")
+const normalise = (s: string) =>
+  s
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
 
 /**
  * Drops a block heading that merely repeats the panel's own title.

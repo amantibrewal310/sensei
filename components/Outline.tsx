@@ -35,9 +35,7 @@ export function Outline({
 
       <ol className="flex-1 overflow-y-auto p-2">
         {pages.length === 0 && (
-          <li className="px-3 py-2 text-sm text-neutral-400">
-            Planning the lesson…
-          </li>
+          <li className="px-3 py-2 text-sm text-neutral-400">Planning the lesson…</li>
         )}
         {pages.map((page, i) => {
           const current = i === currentIndex

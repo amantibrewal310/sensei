@@ -16,7 +16,7 @@ top of themselves, boxes too narrow for their own labels, content sliced off at 
 from asking an LLM to do spatial arithmetic, which is the thing it is worst at. So the work is split
 down the middle:
 
-- **The LLM owns meaning.** Per beat it names a *relationship*: these three things flow into each
+- **The LLM owns meaning.** Per beat it names a _relationship_: these three things flow into each
   other, these are peers, this is a container and these go inside it, these two sit opposite each
   other. That's the whole vocabulary ([`lib/blocks.ts`](lib/blocks.ts)) and there is not a coordinate
   in it.
@@ -42,7 +42,7 @@ compare; a page you have already seen returns exactly as you left it.
 
 **Speech and drawing move in lockstep.** The teacher emits one NDJSON beat per line — a sentence,
 then the single thing that sentence just described — and beats are applied in order as they stream.
-A sentence's shapes are drawn *while it is being spoken*, but the next sentence waits for the last
+A sentence's shapes are drawn _while it is being spoken_, but the next sentence waits for the last
 one to finish.
 
 ```

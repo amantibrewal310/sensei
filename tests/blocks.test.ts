@@ -20,7 +20,9 @@ describe("parseBlock", () => {
 
   it("rejects the old coordinate vocabulary outright", () => {
     // There is no longer any way to express a position, which is the point.
-    expect(parseBlock('{"kind":"box","x":10,"y":20,"w":100,"h":40,"text":"svc"}')).toBeNull()
+    expect(
+      parseBlock('{"kind":"box","x":10,"y":20,"w":100,"h":40,"text":"svc"}'),
+    ).toBeNull()
   })
 
   it("cuts a label the model wrote as a sentence", () => {
@@ -39,9 +41,7 @@ describe("parseBlock", () => {
   })
 
   it("refuses code — it belongs in the pane, not on the board", () => {
-    expect(
-      parseBlock('{"kind":"code","lines":["count += 1"]}'),
-    ).toBeNull()
+    expect(parseBlock('{"kind":"code","lines":["count += 1"]}')).toBeNull()
   })
 
   it("refuses an empty block", () => {
@@ -59,7 +59,9 @@ describe("dropRedundantLabel", () => {
   it("drops a heading that repeats the panel's own title", () => {
     // The title is already drawn as the frame label, so this would print it
     // twice, one above the other.
-    expect(dropRedundantLabel(stack("Core Requirements"), "Core requirements")).toMatchObject({
+    expect(
+      dropRedundantLabel(stack("Core Requirements"), "Core requirements"),
+    ).toMatchObject({
       label: undefined,
     })
   })

@@ -85,7 +85,12 @@ export async function POST(req: Request) {
 
     // Highest-volume call in the app — one per drawing beat — so this is the
     // line that says whether the panel prompt's cache is live.
-    logUsage("draw-panel", PANEL_MODEL, (await stream.finalMessage()).usage, Date.now() - started)
+    logUsage(
+      "draw-panel",
+      PANEL_MODEL,
+      (await stream.finalMessage()).usage,
+      Date.now() - started,
+    )
 
     yield { event: "done", data: {} }
   }

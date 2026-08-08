@@ -12,14 +12,34 @@ import type { CanvasApi } from "@/components/Board"
 
 const PLAN = {
   pages: [
-    { id: "page-1", title: "Token bucket", summary: "permits", question: "how?", kind: "algorithm" },
-    { id: "page-2", title: "Leaky bucket", summary: "a queue", question: "how?", kind: "algorithm" },
+    {
+      id: "page-1",
+      title: "Token bucket",
+      summary: "permits",
+      question: "how?",
+      kind: "algorithm",
+    },
+    {
+      id: "page-2",
+      title: "Leaky bucket",
+      summary: "a queue",
+      question: "how?",
+      kind: "algorithm",
+    },
   ],
 }
 
 const BOARD = {
   panels: [
-    { id: "bucket", title: "The bucket", col: 0, row: 0, colSpan: 1, rowSpan: 1, note: "" },
+    {
+      id: "bucket",
+      title: "The bucket",
+      col: 0,
+      row: 0,
+      colSpan: 1,
+      rowSpan: 1,
+      note: "",
+    },
   ],
   connectors: [],
 }
@@ -125,7 +145,11 @@ describe("useTeachingSession", () => {
     await act(() => result.current.start("rate limiting"))
 
     await waitFor(() => expect(result.current.taught).toContain("page-1"))
-    expect(canvas.current.openPage).toHaveBeenCalledWith("page-1", "Token bucket", expect.anything())
+    expect(canvas.current.openPage).toHaveBeenCalledWith(
+      "page-1",
+      "Token bucket",
+      expect.anything(),
+    )
     expect(canvas.current.syncPanel).toHaveBeenCalled()
     expect(result.current.error).toBeNull()
   })
@@ -160,7 +184,8 @@ describe("useTeachingSession", () => {
     })
 
     // Only now does the abandoned stream finish. It must change nothing.
-    const drawn = () => (canvas.current.syncPanel as ReturnType<typeof vi.fn>).mock.calls.length
+    const drawn = () =>
+      (canvas.current.syncPanel as ReturnType<typeof vi.fn>).mock.calls.length
     const before = drawn()
     held.push(
       frame("text", {
@@ -175,7 +200,8 @@ describe("useTeachingSession", () => {
   })
 
   it("surfaces the message a route sends with a failure", async () => {
-    routes["/api/plan"] = () => Response.json({ error: "topic declined" }, { status: 422 })
+    routes["/api/plan"] = () =>
+      Response.json({ error: "topic declined" }, { status: 422 })
 
     const { result } = renderHook(() => useTeachingSession(stubCanvas()))
     await act(() => result.current.start("something declined"))
@@ -208,7 +234,9 @@ describe("useTeachingSession", () => {
 
     const { result } = renderHook(() => useTeachingSession(stubCanvas()))
     await act(() =>
-      result.current.start("rate limiting").then(() => new Promise((r) => setTimeout(r, 50))),
+      result.current
+        .start("rate limiting")
+        .then(() => new Promise((r) => setTimeout(r, 50))),
     )
 
     expect(result.current.error).toBe("the model is down")

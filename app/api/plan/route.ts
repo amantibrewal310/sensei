@@ -45,9 +45,7 @@ export async function POST(req: Request) {
     output_config: {
       format: { type: "json_schema", schema: PlanJsonSchema },
     },
-    messages: [
-      { role: "user", content: `Topic: ${topic}\n\nDesign the outline.` },
-    ],
+    messages: [{ role: "user", content: `Topic: ${topic}\n\nDesign the outline.` }],
   })
   logUsage("plan", TEACHER_MODEL, msg.usage, Date.now() - started)
 

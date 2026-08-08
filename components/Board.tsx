@@ -280,10 +280,7 @@ export function Board({ api }: { api: Ref<CanvasApi> }) {
     // `if (isReadonly) return`, so it silently swallows the lesson's own
     // drawing too. Refusing pointer events keeps the canvas inert without
     // touching the store.
-    <div
-      ref={containerRef}
-      className="h-full w-full [&_.tl-canvas]:pointer-events-none"
-    >
+    <div ref={containerRef} className="h-full w-full [&_.tl-canvas]:pointer-events-none">
       <Tldraw
         hideUi
         onMount={(editor) => {

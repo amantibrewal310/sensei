@@ -28,8 +28,8 @@ export default function Error({
     <main className="flex h-screen flex-col items-center justify-center gap-4 p-8 text-center">
       <h1 className="text-2xl font-semibold">The lesson hit a snag.</h1>
       <p className="max-w-md text-neutral-500">
-        Something broke while drawing. The board can&rsquo;t be recovered, but
-        starting the lesson again usually works.
+        Something broke while drawing. The board can&rsquo;t be recovered, but starting
+        the lesson again usually works.
       </p>
       {error.digest && (
         <p className="font-mono text-xs text-neutral-400">{error.digest}</p>
@@ -41,10 +41,7 @@ export default function Error({
         >
           Try again
         </button>
-        <Link
-          href="/"
-          className="rounded border border-neutral-300 px-4 py-2 text-sm"
-        >
+        <Link href="/" className="rounded border border-neutral-300 px-4 py-2 text-sm">
           Pick another topic
         </Link>
       </div>
