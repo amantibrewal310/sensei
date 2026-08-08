@@ -79,8 +79,9 @@ Canvas (tldraw) ◄── one tldraw page per lesson page; panels are frames
 Speaker         ◄── OpenAI TTS, played back one sentence at a time
 ```
 
-- **Reasoning:** Claude (`claude-opus-4-8`) plans the outline, designs each page's board, teaches, and
-  chooses each beat's layout.
+- **Reasoning:** Claude (`claude-opus-5`) plans the outline, designs each page's board, teaches, and
+  chooses each beat's layout. Every call logs its token usage and cost; the system prompts are
+  cached, which is most of what a lesson would otherwise cost.
 - **Canvas:** [tldraw](https://tldraw.dev). Frames clip their children, so a panel physically cannot
   spill onto its neighbour; shape ids are derived from where they belong, so a panel can grow and be
   re-placed without the board flickering.
@@ -110,18 +111,34 @@ which happens when `/learn` is opened directly rather than reached from the home
 ## Tests
 
 ```bash
-npm test        # measurement, block parsing, rendering, layout, NDJSON beats, env
+npm test        # geometry, the five routes, and the session hook
 npm run typecheck
 npm run lint
+npm run format  # prettier; CI runs format:check
 ```
 
-CI runs all four plus `npm run build` on every push and pull request, on the Node version in
+CI runs all of it plus `npm run build` on every push and pull request, on the Node version in
 `.nvmrc`.
 
 The geometry guarantees are the part worth testing, and they are: a box is always wide enough for its
 longest word, a chain turns downward rather than being squeezed, a panel is never smaller than its
 contents, a block already on the board never moves when the next one arrives, and panels never
 overlap however badly the planner stacks them.
+
+The routes are tested with **only the Anthropic SDK stubbed**, so zod validation, the NDJSON parser
+and the SSE writer are the real code: a plan that is JSON but the wrong shape is a 502, a declined
+topic is a 422 rather than a generic failure, and one unparseable line costs one block rather than
+the whole drawing. The session hook is tested under jsdom with a teaching stream held open by hand,
+so a turn can be superseded mid-sentence — the abandoned one must not draw and must not mark its
+page taught.
+
+## Not done yet
+
+- **Mobile.** `/learn` is a fixed three-pane layout and is unusable below tablet width. A whiteboard
+  you watch being drawn wants the room; this is a desktop app on purpose, but it should say so.
+- **Nothing is persisted.** A refresh regenerates the lesson from scratch, and re-calls every model
+  to do it.
+- **No auth, no spend cap.** Both are next; the usage logging they need is already in place.
 
 ## License
 

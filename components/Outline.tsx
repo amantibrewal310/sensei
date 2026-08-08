@@ -20,7 +20,10 @@ export function Outline({
   onSelect: (index: number) => void
 }) {
   return (
-    <nav className="flex w-64 shrink-0 flex-col border-r border-neutral-200 bg-white lg:w-72">
+    <nav
+      aria-label="Lesson outline"
+      className="flex w-64 shrink-0 flex-col border-r border-neutral-200 bg-white lg:w-72"
+    >
       <div className="border-b border-neutral-200 px-5 py-4">
         <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-neutral-400">
           Outline
@@ -43,6 +46,10 @@ export function Outline({
             <li key={page.id}>
               <button
                 onClick={() => onSelect(i)}
+                // Which page you are on, and which you have seen, are both
+                // shown only in colour otherwise.
+                aria-current={current ? "page" : undefined}
+                aria-label={`${page.title}${done ? " — already taught" : ""}`}
                 className={`group flex w-full gap-3 rounded-md px-3 py-2.5 text-left transition-colors ${
                   current ? "bg-neutral-100" : "hover:bg-neutral-50"
                 }`}
