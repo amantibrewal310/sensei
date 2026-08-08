@@ -72,7 +72,9 @@ Browser (React) ── drives the teaching loop
   ├─ POST /api/board      → one page's panels on a grid (once per page, on entry)
   ├─ POST /api/teach (SSE)      → NDJSON beats for one page
   ├─ POST /api/draw-panel (SSE) → blocks for ONE panel — relationships, no coordinates
-  └─ POST /api/speak            → narration audio for one sentence
+  ├─ POST /api/speak            → narration audio for one sentence
+  ├─ POST /api/lessons          → save a page as it finishes (no model call)
+  └─ GET  /api/lessons/[id]     → replay one, with no call to Anthropic at all
 lib/render.ts   ── blocks → placed shapes. The only thing that picks a coordinate.
 lib/layout.ts   ── grid tracks sized to what the panels actually hold.
 lib/guard.ts    ── withGuard: approved? under the rate limit? under the caps?
@@ -88,6 +90,10 @@ Speaker         ◄── OpenAI TTS, played back one sentence at a time
   spill onto its neighbour; shape ids are derived from where they belong, so a panel can grow and be
   re-placed without the board flickering.
 - **Narration:** OpenAI text-to-speech, synthesised a few beats ahead of when it is due.
+- **Replay:** a taught lesson is written down as it is taught — the outline, each page's board, and
+  the ordered beats with the blocks each one drew. Replaying reads those back and runs them through
+  the same renderer, so a demo does not depend on an API call succeeding on someone else's wifi.
+  Blocks are already the source of truth, which is the only reason this is storage rather than video.
 - **Access:** Google sign-in (Auth.js) over Neon Postgres. Signing in is not being let in — a new
   account lands as `pending` and an administrator approves it, because every route past that point
   spends money. Sessions live in the database rather than in a JWT, so an approval takes effect on
@@ -152,8 +158,9 @@ page taught.
 
 - **Mobile.** `/learn` is a fixed three-pane layout and is unusable below tablet width. A whiteboard
   you watch being drawn wants the room; this is a desktop app on purpose, but it should say so.
-- **Nothing is persisted.** A refresh regenerates the lesson from scratch, and re-calls every model
-  to do it.
+- **Replay re-synthesises narration.** Everything Anthropic produced is stored and read back, so a
+  replay makes **no** call to Anthropic — but the voice is generated again, at about $0.08 a lesson.
+  Storing audio is a different problem and is not solved here.
 - **The caps are monthly and coarse.** A per-user and a global dollar cap, plus a per-minute rate
   limit, all summed from `usage_event` — which is written _after_ a call returns, so a burst of
   simultaneous requests can overshoot by roughly one lesson. Fine for a cost backstop, not a DoS

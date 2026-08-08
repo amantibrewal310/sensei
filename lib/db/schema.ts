@@ -2,11 +2,13 @@ import {
   bigint,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
   text,
   timestamp,
+  unique,
 } from "drizzle-orm/pg-core"
 import type { AdapterAccountType } from "next-auth/adapters"
 
@@ -110,6 +112,81 @@ export const verificationTokens = pgTable(
     expires: timestamp("expires", { mode: "date" }).notNull(),
   },
   (t) => [primaryKey({ columns: [t.identifier, t.token] })],
+)
+
+/**
+ * A lesson that has been taught, kept so it can be taught again for free.
+ *
+ * The expensive, slow, failure-prone part of this app is the Anthropic calls —
+ * about a dollar and several minutes per lesson, over whatever wifi the room
+ * happens to have. Everything they produce is data: an outline, a board per
+ * page, and an ordered list of beats. Stored, a lesson replays with **zero**
+ * calls to Anthropic, which is the difference between a demo and a gamble.
+ */
+export const lessons = pgTable(
+  "lesson",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    /**
+     * `set null`, matching usage_event and for a related reason: a lesson is
+     * worth keeping after the account that generated it is gone. It cost real
+     * money to make and it is the thing being demonstrated.
+     */
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    topic: text("topic").notNull(),
+    /**
+     * The whole outline, including pages that were never reached.
+     *
+     * Not derivable from `lesson_page`: a lesson abandoned at page three of
+     * eight has three rows there, and rebuilding the outline from them would
+     * quietly shorten the lesson to whatever was finished.
+     */
+    pages: jsonb("pages").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("lesson_user_created_idx").on(t.userId, t.createdAt)],
+)
+
+/**
+ * One page of a stored lesson, written when that page finishes teaching.
+ *
+ * Per page rather than one document per lesson, because a lesson is saved as it
+ * is taught: a learner who stops after three pages should keep three pages, and
+ * incremental progress into a single JSON blob is a read-modify-write that
+ * would lose one of them the first time two pages landed together.
+ *
+ * `beats` is the ordered NDJSON the teacher emitted, with the blocks that each
+ * draw beat produced folded in beside it — so replay needs neither /api/teach
+ * nor /api/draw-panel. Their shapes are zod'd on the way in and on the way out;
+ * jsonb here is storage, not a licence to skip validation.
+ */
+export const lessonPages = pgTable(
+  "lesson_page",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    lessonId: text("lesson_id")
+      .notNull()
+      // A page without its lesson is unreachable, so here cascade is right.
+      .references(() => lessons.id, { onDelete: "cascade" }),
+    idx: integer("idx").notNull(),
+    page: jsonb("page").notNull(),
+    board: jsonb("board").notNull(),
+    beats: jsonb("beats").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Re-teaching a page overwrites it rather than stacking a second copy, and
+    // this is what makes that an upsert instead of a delete-then-insert.
+    unique("lesson_page_lesson_idx_key").on(t.lessonId, t.idx),
+  ],
 )
 
 /**

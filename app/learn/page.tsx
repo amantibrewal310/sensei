@@ -17,6 +17,9 @@ const Board = dynamic(() => import("@/components/Board").then((m) => m.Board), {
 function LearnInner() {
   const params = useSearchParams()
   const topic = params.get("topic") ?? ""
+  // ?lesson=<id> replays a stored lesson instead of teaching a new one: same
+  // page, same canvas, no call to Anthropic.
+  const lesson = params.get("lesson") ?? ""
   const canvas = useRef<CanvasApi | null>(null)
   const startedRef = useRef(false)
 
@@ -24,11 +27,15 @@ function LearnInner() {
   const [ask, setAsk] = useState("")
 
   useEffect(() => {
-    if (topic && !startedRef.current) {
+    if (startedRef.current) return
+    if (lesson) {
+      startedRef.current = true
+      void session.replay(lesson)
+    } else if (topic) {
       startedRef.current = true
       void session.start(topic)
     }
-  }, [topic, session])
+  }, [lesson, topic, session])
 
   return (
     <div className="flex h-screen bg-neutral-50">

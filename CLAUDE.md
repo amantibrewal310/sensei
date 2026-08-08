@@ -59,6 +59,14 @@ npm run db:studio     # browse the data
 Migrations are checked in. Never `db push` — the point of `drizzle/` is that the history of the
 schema is readable, and pushing skips writing it down.
 
+**A column interpolated into a raw SQL fragment is rendered unqualified**, which makes correlated
+subqueries silently wrong. Writing the page count as a subquery over `lesson_page` compared against
+`lessons.id` produced `where "lesson_id" = "id"` — and inside that subquery `"id"` binds to
+`lesson_page`'s own id, so every count came back 0. Postgres accepts it without complaint. Prefer a
+`leftJoin` with `groupBy`, which has no name left to resolve wrongly. The tests will not catch this
+class of bug: they mock the database, so a query that is valid SQL and wrong is invisible to them.
+Run a new query against Neon once before trusting it.
+
 CI runs typecheck, lint, format:check, test and build on every push.
 
 ## Auth
