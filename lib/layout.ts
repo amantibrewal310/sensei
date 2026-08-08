@@ -1,13 +1,18 @@
 import { GRID, type Board, type Connector, type Panel } from "./board"
-import { truncate } from "./pack"
+import type { Block } from "./blocks"
+import { MIN_PANEL_H, MIN_PANEL_W, naturalPanelSize } from "./render"
 
-export const CANVAS = { width: 1000, height: 700 }
-const MARGIN = 32
-// Wide enough to be a LANE, not just a seam. Connector labels ride the midpoint
-// of an arrow between two panels — with a thin gutter they had nowhere to sit
-// and smeared across both panels they were joining. The camera zooms to fit, so
-// a roomier board costs nothing on screen.
-const GUTTER = 44
+// The board's geometry, derived from what the panels actually hold.
+//
+// This used to be a fixed 1000x700 canvas cut into equal cells, which meant a
+// panel's size had nothing to do with its contents: a one-column slot was 201px
+// wide whether it held two words or a three-item diagram, and anything that
+// didn't fit was pushed down until it fell out of the frame. Now the tracks size
+// themselves to their panels, so a panel is never smaller than what is in it and
+// overflow has nowhere to come from.
+
+const MARGIN = 40
+const GUTTER = 56
 
 export interface Rect {
   x: number
@@ -23,28 +28,42 @@ export interface PlacedPanel extends Panel {
 export interface Layout {
   panels: PlacedPanel[]
   connectors: Connector[]
-  /** Panels the model asked for that the grid had no room for. */
-  dropped: string[]
+  canvas: { width: number; height: number }
 }
 
-const cellWidth =
-  (CANVAS.width - 2 * MARGIN - (GRID.cols - 1) * GUTTER) / GRID.cols
-const cellHeight =
-  (CANVAS.height - 2 * MARGIN - (GRID.rows - 1) * GUTTER) / GRID.rows
+/** The blocks currently drawn in each panel, by panel id. */
+export type PanelContent = ReadonlyMap<string, Block[]>
 
-/** The pixel box spanned by a block of grid cells. */
-export function cellsToRect(
-  col: number,
-  row: number,
-  colSpan: number,
-  rowSpan: number,
-): Rect {
-  return {
-    x: Math.round(MARGIN + col * (cellWidth + GUTTER)),
-    y: Math.round(MARGIN + row * (cellHeight + GUTTER)),
-    width: Math.round(colSpan * cellWidth + (colSpan - 1) * GUTTER),
-    height: Math.round(rowSpan * cellHeight + (rowSpan - 1) * GUTTER),
-  }
+/**
+ * The first thing every consumer of a `Layout` does. It lives here, with the
+ * type, rather than being open-coded at each of the five call sites that need
+ * it — each of which was also deciding independently what a miss means.
+ */
+export function panelById(layout: Layout, id: string): PlacedPanel | undefined {
+  return layout.panels.find((p) => p.id === id)
+}
+
+/**
+ * Lays a small board out left-to-right, whatever slots the model asked for.
+ *
+ * The canvas is far wider than it is tall, so two panels side by side are taken
+ * in at a glance while a stacked pair has to be scrolled through. Asking for
+ * this in the prompt did not hold — the model kept stacking.
+ *
+ * Spans are flattened too. They meant something when every cell was the same
+ * fixed size and a panel had to claim two of them to be wide; now that a panel
+ * is sized by what it holds, a span conveys nothing and only serves to push its
+ * neighbour onto the next row.
+ */
+function preferSideBySide(panels: Panel[]): Panel[] {
+  if (panels.length > GRID.cols) return panels
+  return panels.map((p, i) => ({
+    ...p,
+    col: i,
+    row: 0,
+    colSpan: 1,
+    rowSpan: 1,
+  }))
 }
 
 function free(
@@ -64,23 +83,22 @@ function free(
 }
 
 /**
- * Places panels on the grid, honouring the model's requested slot when it is
- * genuinely free and relocating the panel to the first free block of the same
- * size when it is not.
+ * Resolves the model's requested slots into a set of non-overlapping ones,
+ * relocating a panel whose cell is already claimed and dropping one the grid has
+ * no room for at all.
  *
- * This is the entire overlap guarantee. The model is asked for sensible slots
- * but never *trusted* for them: two panels claiming the same cell is a routine
- * model error, and it used to reach the canvas as one diagram drawn on top of
- * another. Here it costs a relocation instead.
+ * This is the entire overlap guarantee. Two panels claiming the same cell is a
+ * routine model error, and it used to reach the canvas as one diagram drawn on
+ * top of another.
  */
 export function placePanels(panels: Panel[]): {
-  placed: PlacedPanel[]
+  placed: Panel[]
   dropped: string[]
 } {
   const taken: boolean[][] = Array.from({ length: GRID.rows }, () =>
     Array<boolean>(GRID.cols).fill(false),
   )
-  const placed: PlacedPanel[] = []
+  const placed: Panel[] = []
   const dropped: string[] = []
 
   for (const panel of panels) {
@@ -104,8 +122,6 @@ export function placePanels(panels: Panel[]): {
       }
     }
 
-    // The board is full and this panel has nowhere to go. Dropping it is the
-    // only honest option — drawing it anyway is what produced the overlaps.
     if (col === -1) {
       dropped.push(panel.id)
       continue
@@ -114,58 +130,136 @@ export function placePanels(panels: Panel[]): {
     for (let r = row; r < row + h; r++) {
       for (let c = col; c < col + w; c++) taken[r][c] = true
     }
-    placed.push({
-      ...panel,
-      col,
-      row,
-      colSpan: w,
-      rowSpan: h,
-      rect: cellsToRect(col, row, w, h),
-    })
+    placed.push({ ...panel, col, row, colSpan: w, rowSpan: h })
   }
 
   return { placed, dropped }
 }
 
-/** Do two panels' cell blocks share an edge (or a corner)? */
-export function adjacent(a: PlacedPanel, b: PlacedPanel): boolean {
-  const gap = (
-    aStart: number,
-    aSpan: number,
-    bStart: number,
-    bSpan: number,
-  ) => Math.max(aStart - (bStart + bSpan), bStart - (aStart + aSpan))
+/**
+ * Sizes one axis of the grid to its content.
+ *
+ * A track that no panel occupies gets zero width and no gutter, so an unused
+ * column costs nothing — which matters now that a page holds two or three
+ * panels rather than filling the grid.
+ */
+function sizeTracks(
+  panels: Panel[],
+  count: number,
+  start: (p: Panel) => number,
+  span: (p: Panel) => number,
+  need: (p: Panel) => number,
+  min: number,
+): number[] {
+  const used = Array<boolean>(count).fill(false)
+  for (const p of panels) {
+    for (let i = start(p); i < start(p) + span(p); i++) used[i] = true
+  }
+  const tracks = used.map((u) => (u ? min : 0))
 
-  const colGap = gap(a.col, a.colSpan, b.col, b.colSpan)
-  const rowGap = gap(a.row, a.rowSpan, b.row, b.rowSpan)
-  return colGap <= 0 && rowGap <= 0
+  for (const p of panels) {
+    if (span(p) === 1) tracks[start(p)] = Math.max(tracks[start(p)], need(p))
+  }
+
+  // A panel spanning several tracks only forces them to grow if they cannot
+  // already hold it between them.
+  for (const p of panels) {
+    const n = span(p)
+    if (n === 1) continue
+    let have = (n - 1) * GUTTER
+    for (let i = start(p); i < start(p) + n; i++) have += tracks[i]
+    if (need(p) <= have) continue
+    const extra = (need(p) - have) / n
+    for (let i = start(p); i < start(p) + n; i++) tracks[i] += extra
+  }
+
+  return tracks.map((t) => Math.ceil(t))
 }
 
-const MAX_CONNECTORS = 4
-const MAX_CONNECTOR_LABEL = 16
+function offsetsOf(tracks: number[]): { offsets: number[]; extent: number } {
+  const offsets: number[] = []
+  let at = MARGIN
+  for (const track of tracks) {
+    offsets.push(at)
+    if (track > 0) at += track + GUTTER
+  }
+  return { offsets, extent: at > MARGIN ? at - GUTTER + MARGIN : 2 * MARGIN }
+}
 
-export function layoutBoard(board: Board): Layout {
-  const { placed, dropped } = placePanels(board.panels)
-  const byId = new Map(placed.map((p) => [p.id, p]))
+function extentOf(tracks: number[], start: number, span: number): number {
+  let total = 0
+  let gutters = 0
+  for (let i = start; i < start + span; i++) {
+    total += tracks[i]
+    if (tracks[i] > 0 && i > start) gutters++
+  }
+  return total + gutters * GUTTER
+}
 
+/** Do two panels' cell blocks share an edge (or a corner)? */
+export function adjacent(a: Panel, b: Panel): boolean {
+  const gap = (aStart: number, aSpan: number, bStart: number, bSpan: number) =>
+    Math.max(aStart - (bStart + bSpan), bStart - (aStart + aSpan))
+
+  return (
+    gap(a.col, a.colSpan, b.col, b.colSpan) <= 0 &&
+    gap(a.row, a.rowSpan, b.row, b.rowSpan) <= 0
+  )
+}
+
+const MAX_CONNECTORS = 3
+
+export function layoutBoard(board: Board, content?: PanelContent): Layout {
+  // A panel the grid had no room for is simply not placed. It used to be
+  // reported back as `dropped`, which nothing ever read.
+  const { placed } = placePanels(preferSideBySide(board.panels))
+
+  const natural = new Map(
+    placed.map((p) => [p.id, naturalPanelSize(content?.get(p.id) ?? [])]),
+  )
+
+  const colWidths = sizeTracks(
+    placed,
+    GRID.cols,
+    (p) => p.col,
+    (p) => p.colSpan,
+    (p) => natural.get(p.id)!.width,
+    MIN_PANEL_W,
+  )
+  const rowHeights = sizeTracks(
+    placed,
+    GRID.rows,
+    (p) => p.row,
+    (p) => p.rowSpan,
+    (p) => natural.get(p.id)!.height,
+    MIN_PANEL_H,
+  )
+
+  const cols = offsetsOf(colWidths)
+  const rows = offsetsOf(rowHeights)
+
+  const panels: PlacedPanel[] = placed.map((p) => ({
+    ...p,
+    rect: {
+      x: cols.offsets[p.col],
+      y: rows.offsets[p.row],
+      width: extentOf(colWidths, p.col, p.colSpan),
+      height: extentOf(rowHeights, p.row, p.rowSpan),
+    },
+  }))
+
+  const byId = new Map(panels.map((p) => [p.id, p]))
   const connectors = board.connectors
     .filter((c) => {
       const from = byId.get(c.from)
       const to = byId.get(c.to)
-      // A connector to a panel that was dropped (or hallucinated) has nothing
-      // to attach to; an arrow pointing at empty canvas is worse than none.
+      // An arrow to a panel that was dropped (or hallucinated) has nothing to
+      // attach to, and an arrow between distant panels cuts straight through
+      // whatever sits between them.
       if (!from || !to || from.id === to.id) return false
-      // An arrow between two distant panels cuts straight through whatever sits
-      // between them. Only neighbours may be joined — enforced here rather than
-      // merely requested, because the planner cannot see what it is crossing.
       return adjacent(from, to)
     })
-    // Every arrow carries a label, and labels collide. A board with four clear
-    // arrows reads; one with eight is the spaghetti this project started with.
     .slice(0, MAX_CONNECTORS)
-    // The label rides the arrow's midpoint, out in the gutter between panels.
-    // The gutter is wide, but it is not a paragraph.
-    .map((c) => ({ ...c, label: truncate(c.label, MAX_CONNECTOR_LABEL) }))
 
-  return { panels: placed, connectors, dropped }
+  return { panels, connectors, canvas: { width: cols.extent, height: rows.extent } }
 }

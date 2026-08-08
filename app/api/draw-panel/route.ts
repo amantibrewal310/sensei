@@ -1,61 +1,62 @@
-import { NextResponse } from "next/server"
-import { anthropic, sseResponse } from "@/lib/anthropic"
+import { z } from "zod"
+import { anthropic } from "@/lib/anthropic"
+import { sseResponse } from "@/lib/sse"
+import { LineParser } from "@/lib/ndjson"
 import { PANEL_MODEL } from "@/lib/models"
 import { PANEL_SYSTEM } from "@/lib/prompts"
-import { ShapeLineParser, clampToPanel, type PanelShape } from "@/lib/shapes"
-import { pack, type Rect } from "@/lib/pack"
+import { Block, describeBlocks, dropRedundantLabel, parseBlock } from "@/lib/blocks"
+import { readBody } from "@/lib/request"
+import { withGuard } from "@/lib/guard"
+import { recordModelUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
+// Vercel Hobby: 10s default, 60s ceiling. See app/api/plan/route.ts.
+export const maxDuration = 60
 
-interface Body {
-  title: string
-  width: number
-  height: number
-  what: string
-  /** The geometry already occupying this panel. Not a description of it — the actual boxes. */
-  occupied: { x: number; y: number; w: number; h: number; text: string }[]
-}
+// Named once: withGuard puts it in the log line, recordUsage puts it in
+// `usage_event.route`, and the spend cap reads that column.
+const ROUTE = "draw-panel"
 
-export async function POST(req: Request) {
-  const body = (await req.json().catch(() => null)) as Body | null
-  const title = body?.title
-  const width = body?.width
-  const height = body?.height
-  const what = body?.what
-  const occupied = body?.occupied ?? []
+const DrawPanelRequest = z.object({
+  title: z.string().min(1).max(200),
+  note: z.string().max(500).default(""),
+  what: z.string().min(1).max(1000),
+  /**
+   * The blocks this panel already holds, so the model adds rather than repeats.
+   *
+   * Previously accepted on the strength of `Array.isArray()` alone and passed
+   * straight to `describeBlocks`, which JSON-stringifies each element into the
+   * prompt — so anything at all could be put in front of the model here.
+   */
+  existing: z.array(Block).max(40).default([]),
+})
 
-  if (
-    typeof title !== "string" ||
-    typeof what !== "string" ||
-    !what.trim() ||
-    typeof width !== "number" ||
-    typeof height !== "number"
-  ) {
-    return NextResponse.json({ error: "invalid panel request" }, { status: 400 })
-  }
+// Streams BLOCKS, not shapes.
+//
+// The old version of this route handed the model a list of occupied rectangles
+// and the first clear y below them, and asked it to place shapes in what was
+// left. That is spatial arithmetic, and the model was bad at it in the specific
+// way LLMs are bad at it — so a collision packer sat downstream repairing the
+// answer, and the repairs were what you saw on the board. There is nothing to
+// repair now: a block cannot express a position, so it cannot express a bad one.
+export const POST = withGuard(ROUTE, async (req, user) => {
+  const body = await readBody(req, DrawPanelRequest)
+  if (!body.ok) return body.response
+  // Parsing rather than hand-checking also retires the `panelTitle` const that
+  // used to live here: `title` was `string | undefined` narrowed by a guard, and
+  // the hoisted `gen` below could not see the narrowing. It arrives as a string.
+  const { title, note, what, existing } = body.data
 
-  // Telling the model *what* it drew before is useless — it needs to know
-  // WHERE. Handing it the occupied boxes, plus the first clear y below them, is
-  // what stops a panel being drawn on top of itself.
-  const lowest = occupied.reduce((max, o) => Math.max(max, o.y + o.h), 0)
-  const freeY = lowest ? lowest + 14 : 16
-
-  const alreadyThere = occupied.length
-    ? `ALREADY DRAWN IN THIS PANEL — these boxes are taken, do not overlap them:\n` +
-      occupied
-        .map(
-          (o) =>
-            `- (${o.x}, ${o.y}) to (${o.x + o.w}, ${o.y + o.h})${o.text ? ` "${o.text}"` : ""}`,
-        )
-        .join("\n") +
-      `\n\nThe first clear space below them starts at y = ${freeY}. There are ${Math.max(0, height - freeY)}px left.`
-    : "This panel is empty. Start at y = 16."
+  const alreadyThere = existing.length
+    ? `This panel already holds these blocks, in order. Add BELOW them, and do not repeat them:\n${describeBlocks(existing)}`
+    : "This panel is empty."
 
   const userText =
-    `Panel: "${title}"\nSize: ${width} x ${height} px (local coordinates, 0,0 is its top-left).\n\n` +
+    `Panel: "${title}"${note ? ` — ${note}` : ""}\n\n` +
     `${alreadyThere}\n\nAdd now:\n${what}`
 
   async function* gen() {
+    const started = Date.now()
     const stream = anthropic.messages.stream({
       model: PANEL_MODEL,
       max_tokens: 2000,
@@ -69,36 +70,36 @@ export async function POST(req: Request) {
       messages: [{ role: "user", content: userText }],
     })
 
-    const parser = new ShapeLineParser()
-    const w = width as number
-    const h = height as number
-
-    // Seeded with what earlier beats left behind, then grown as this beat emits
-    // — so the model cannot collide with the past OR with itself mid-breath.
-    const taken: Rect[] = occupied.map((o) => ({
-      x: o.x,
-      y: o.y,
-      w: o.w,
-      h: o.h,
-      labelled: !!o.text,
-    }))
-
-    const place = function* (shape: PanelShape) {
-      const packed = pack(clampToPanel(shape, w, h), taken, w, h)
-      if (!packed) return // panel is full; a dropped shape beats an unreadable one
-      taken.push(...packed.rects)
-      yield { event: "shape", data: packed.shape }
-    }
+    // Normalised here, at the producer, rather than by whoever happens to be
+    // reading the stream — the rule ("a stack heading must not repeat the frame
+    // label it sits under") is a fact about this prompt, and `title` is right
+    // here. A second consumer, or a replay of stored blocks, gets it too.
+    const parser = new LineParser((line: string) => {
+      const block = parseBlock(line)
+      return block && dropRedundantLabel(block, title)
+    })
 
     for await (const ev of stream) {
       if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
-        for (const shape of parser.push(ev.delta.text)) yield* place(shape)
+        for (const block of parser.push(ev.delta.text)) {
+          yield { event: "block", data: block }
+        }
       }
     }
-    for (const shape of parser.flush()) yield* place(shape)
+    for (const block of parser.flush()) yield { event: "block", data: block }
+
+    // Highest-volume call in the app — one per drawing beat — so this is the
+    // line that says whether the panel prompt's cache is live.
+    await recordModelUsage({
+      route: ROUTE,
+      userId: user.id,
+      model: PANEL_MODEL,
+      usage: (await stream.finalMessage()).usage,
+      ms: Date.now() - started,
+    })
 
     yield { event: "done", data: {} }
   }
 
   return sseResponse(gen())
-}
+})

@@ -1,47 +1,126 @@
 "use client"
 
 import { useCallback, useRef, useState } from "react"
-import { NdjsonActionParser } from "@/lib/ndjson"
-import type { PanelShape } from "@/lib/shapes"
-import { footprintsOf } from "@/lib/pack"
+import { LineParser, parseAction } from "@/lib/ndjson"
+import { readSse } from "@/lib/sse"
 import { Narrator } from "@/lib/narrator"
 import type { CanvasApi } from "@/components/Board"
-import type { Layout } from "@/lib/layout"
-import type { Step, TeacherAction } from "@/lib/types"
+import type { Block } from "@/lib/blocks"
+import type { Board } from "@/lib/board"
+import type { Snippet } from "@/lib/code"
+import { StoredLesson, type StoredBeat } from "@/lib/replay"
+import { TRANSCRIPT_WINDOW, type Page } from "@/lib/lesson"
+import { layoutBoard, panelById, type Layout } from "@/lib/layout"
+import { renderPanel } from "@/lib/render"
+import type { TeacherAction } from "@/lib/types"
 
 type Status = "idle" | "planning" | "teaching" | "done"
-type Msg = { role: "user" | "assistant"; text: string }
+export type Msg = { role: "user" | "assistant"; text: string }
+
+/**
+ * Adds a message to the transcript, dropping the oldest to stay inside
+ * `TRANSCRIPT_WINDOW`.
+ *
+ * Trimmed as it is written rather than as it is sent: the array is then bounded
+ * everywhere it is read, instead of every future reader having to remember to
+ * bound it. Oldest-first is what keeps the learner's latest question — always
+ * the message pushed most recently — from being the one thrown away.
+ */
+export function remember(transcript: Msg[], msg: Msg): void {
+  transcript.push(msg)
+  if (transcript.length > TRANSCRIPT_WINDOW) {
+    transcript.splice(0, transcript.length - TRANSCRIPT_WINDOW)
+  }
+}
+
+/**
+ * What one turn has left of its `/api/draw-panel` allowance. Mutable, and shared
+ * by every beat of that turn.
+ */
+interface Beats {
+  left: number
+}
+
+/**
+ * The most drawing calls one teaching turn may make.
+ *
+ * `TEACHER_SYSTEM` asks for four to seven spoken lines with one drawing apiece,
+ * and a measured page came back with six — so this is about twice what a turn
+ * that follows its instructions needs. It is here for the turn that does not: a
+ * model that keeps emitting draw beats spends an Opus call on each, and this is
+ * the only thing in the client that says when to stop.
+ */
+const MAX_PANEL_BEATS = 12
 
 /** How long a caption holds when there is no audio to pace it. */
 function dwell(text: string): number {
   return Math.min(3200, Math.max(900, text.length * 38))
 }
 
-const SHAPE_MS = 280 // the pace of the pen
+const SHAPE_MS = 240 // the pace of the pen
 /** A sentence should be underway before its shape appears, not simultaneous with it. */
 const LEAD_MS = 450
+/** Code types out faster than the pen draws — it is read, not watched. */
+const CODE_LINE_MS = 90
 
 function wait(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms))
 }
 
-type Occupied = { x: number; y: number; w: number; h: number; text: string }
+/**
+ * The message a route sent with a non-2xx, falling back to `fallback`.
+ *
+ * Every route answers a failure with `{error}`, but a proxy timing out or a
+ * crash upstream answers with HTML or nothing at all — so reading the body must
+ * not itself be able to throw and turn a handled failure into an unhandled one.
+ */
+async function errorFrom(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: unknown }
+    return typeof body.error === "string" ? body.error : fallback
+  } catch {
+    return fallback
+  }
+}
 
-function occupiedBy(shape: PanelShape): Occupied[] {
-  return footprintsOf(shape).map((r) => ({
-    x: Math.round(r.x),
-    y: Math.round(r.y),
-    w: Math.round(r.w),
-    h: Math.round(r.h),
-    text: r.labelled ? shape.text : "",
-  }))
+/** Reads the `{message}` payload `sseResponse` sends on its `error` frame. */
+function messageFromErrorFrame(data: string, fallback: string): string {
+  try {
+    const body = JSON.parse(data) as { message?: unknown }
+    return typeof body.message === "string" && body.message ? body.message : fallback
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * One page's canvas: the board it was given, what has been drawn into each
+ * panel, and the layout those two produce. The blocks are the source of truth —
+ * the layout is recomputed from them every time a panel grows.
+ */
+interface PageState {
+  board: Board
+  content: Map<string, Block[]>
+  layout: Layout
 }
 
 export function useTeachingSession(canvas: { current: CanvasApi | null }) {
-  const [steps, setSteps] = useState<Step[]>([])
+  const [pages, setPages] = useState<Page[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [taught, setTaught] = useState<string[]>([])
+  // Snippets per page, so navigating back to "Token bucket" brings its code
+  // with it exactly as its diagram comes back.
+  const [code, setCode] = useState<Record<string, Snippet[]>>({})
   const [status, setStatus] = useState<Status>("idle")
   const [caption, setCaption] = useState("")
+  // The caption is replaced by the next sentence, so on its own it is a lesson
+  // you cannot look back at. This is the same text kept, and it is what makes
+  // the spoken half of the lesson readable rather than merely audible.
+  const [spoken, setSpoken] = useState<string[]>([])
+  // Separate from `caption`, which is the lesson talking. This is the app
+  // admitting something went wrong, and it must not be overwritten by the next
+  // sentence the teacher happens to emit.
+  const [error, setError] = useState<string | null>(null)
   const [soundBlocked, setSoundBlocked] = useState(false)
   const [narrator] = useState(() => new Narrator())
 
@@ -49,71 +128,292 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   // NEXT sentence waits for it — that is what keeps speech and board in step.
   const speakingRef = useRef<Promise<void>>(Promise.resolve())
 
-  const stepsRef = useRef<Step[]>([])
+  const topicRef = useRef("")
+  const pagesRef = useRef<Page[]>([])
   const indexRef = useRef(0)
-  const boardRef = useRef<Layout | null>(null)
+  const stateRef = useRef(new Map<string, PageState>())
   const transcriptRef = useRef<Msg[]>([])
-  // The geometry each panel already holds. Describing past beats in words was
-  // not enough — the model needs the actual boxes, or it draws over them.
-  const drawnRef = useRef(new Map<string, Occupied[]>())
 
   const genRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
 
-  const drawPanel = useCallback(
-    async (gen: number, panelId: string, what: string) => {
-      const panel = boardRef.current?.panels.find((p) => p.id === panelId)
-      if (!panel) return
+  // The lesson being written down as it is taught. `beatsRef` accumulates the
+  // current page's beats; `lessonIdRef` is empty until the first page is saved
+  // and identifies the row after that.
+  const lessonIdRef = useRef<string | undefined>(undefined)
+  const beatsRef = useRef<StoredBeat[]>([])
+  // Set when replaying, so the teaching path knows not to save what it just
+  // read back — and not to call a model for it either.
+  const replayingRef = useRef(false)
 
-      const res = await fetch("/api/draw-panel", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          title: panel.title,
-          width: panel.rect.width,
-          height: panel.rect.height,
-          what,
-          occupied: drawnRef.current.get(panelId) ?? [],
-        }),
-      })
-      if (!res.body || gen !== genRef.current) return
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ""
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (gen !== genRef.current) {
-          await reader.cancel()
-          return
-        }
-        buf += decoder.decode(value, { stream: true })
-        const frames = buf.split("\n\n")
-        buf = frames.pop() ?? ""
-        for (const frame of frames) {
-          const ev = frame.split("\n").find((l) => l.startsWith("event: "))?.slice(7)
-          const data = frame.split("\n").find((l) => l.startsWith("data: "))?.slice(6)
-          // The server has already validated and clamped each shape.
-          if (ev === "shape" && data) {
-            const shape = JSON.parse(data) as PanelShape
-            canvas.current?.addShape(panelId, shape)
-            const known = drawnRef.current.get(panelId) ?? []
-            drawnRef.current.set(panelId, [...known, ...occupiedBy(shape)])
-            await wait(SHAPE_MS) // one shape at a time — this IS the sketching
-          }
-        }
+  /** Fetches this page's board the first time it is visited, and shows it. */
+  const openPage = useCallback(
+    async (gen: number, page: Page, saved?: Board): Promise<PageState | null> => {
+      const existing = stateRef.current.get(page.id)
+      if (existing) {
+        canvas.current?.openPage(page.id, page.title, existing.layout)
+        return existing
       }
+
+      // A stored lesson already has this page's board. Taking it here is what
+      // removes /api/board from the replay path entirely.
+      if (saved) {
+        const restored: PageState = {
+          board: saved,
+          content: new Map(),
+          layout: layoutBoard(saved),
+        }
+        stateRef.current.set(page.id, restored)
+        canvas.current?.openPage(page.id, page.title, restored.layout)
+        return restored
+      }
+
+      setCaption(`Setting up “${page.title}”…`)
+
+      let res: Response
+      try {
+        res = await fetch("/api/board", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ topic: topicRef.current, page }),
+        })
+      } catch {
+        // Offline, DNS, or a dropped connection. Unlike a superseded turn this
+        // is a real failure, and the learner is owed an explanation.
+        if (gen === genRef.current) {
+          setError(`Couldn't reach the server to set up “${page.title}”.`)
+        }
+        return null
+      }
+      if (gen !== genRef.current) return null
+
+      if (!res.ok) {
+        setError(await errorFrom(res, `Couldn't set up “${page.title}”.`))
+        return null
+      }
+
+      let board: Board
+      try {
+        board = (await res.json()) as Board
+      } catch {
+        setError(`The board for “${page.title}” came back malformed.`)
+        return null
+      }
+      if (!board?.panels?.length) {
+        setError(`The board for “${page.title}” came back empty.`)
+        return null
+      }
+
+      const state: PageState = {
+        board,
+        content: new Map(),
+        layout: layoutBoard(board),
+      }
+      stateRef.current.set(page.id, state)
+      canvas.current?.openPage(page.id, page.title, state.layout)
+      return state
     },
     [canvas],
   )
 
+  /**
+   * Puts one block on the board and reveals its shapes one at a time.
+   *
+   * Extracted so that replaying a stored lesson and teaching a live one take
+   * exactly the same path through the geometry. If they diverged, a replay
+   * would look subtly unlike the lesson it is replaying, and the whole point of
+   * storing blocks rather than pictures is that they do not.
+   */
+  const applyBlock = useCallback(
+    async (gen: number, page: Page, state: PageState, panelId: string, block: Block) => {
+      const blocks = [...(state.content.get(panelId) ?? []), block]
+      state.content.set(panelId, blocks)
+
+      // The panel now holds more than it did, so the whole board is re-laid
+      // out: this panel grows, and its column grows with it if it must. The
+      // panel is never smaller than its contents, which is why nothing here
+      // can overflow or be dropped.
+      state.layout = layoutBoard(state.board, state.content)
+      canvas.current?.applyLayout(page.id, state.layout)
+
+      const { shapes, starts } = renderPanel(blocks)
+      const from = starts[starts.length - 1]
+
+      // Everything already on the board may have shifted when the panel grew,
+      // so it is re-placed ONCE here. The reveal below then only ever adds the
+      // next shape, instead of rewriting the whole panel on every tick.
+      canvas.current?.syncPanel(page.id, state.layout, panelId, shapes, from, 0)
+
+      for (let i = from; i < shapes.length; i++) {
+        if (gen !== genRef.current) return
+        canvas.current?.syncPanel(page.id, state.layout, panelId, shapes, i + 1, i)
+        await wait(SHAPE_MS) // one shape at a time — this IS the sketching
+      }
+      canvas.current?.focus(page.id, state.layout, panelId)
+    },
+    [canvas],
+  )
+
+  const drawPanel = useCallback(
+    async (
+      gen: number,
+      page: Page,
+      state: PageState,
+      beats: Beats,
+      panelId: string,
+      what: string,
+    ): Promise<Block[]> => {
+      // Collected here rather than read back off `state.content` afterwards: a
+      // panel can be drawn into twice in one page, and this beat owns only the
+      // blocks this call produced.
+      const drawn: Block[] = []
+      const panel = panelById(state.layout, panelId)
+      if (!panel) return drawn
+
+      // Said out loud rather than quietly skipped. A board that stops filling in
+      // with no explanation is the same silent failure the `!res.ok` check below
+      // exists to prevent — and if this ever trips in front of anyone, the
+      // reason should be on screen and not in a log.
+      if (beats.left <= 0) {
+        setError(
+          `“${page.title}” asked for more than ${MAX_PANEL_BEATS} drawings, so the rest were skipped.`,
+        )
+        return drawn
+      }
+      beats.left -= 1
+
+      canvas.current?.focus(page.id, state.layout, panelId)
+
+      let res: Response
+      try {
+        res = await fetch("/api/draw-panel", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            title: panel.title,
+            note: panel.note,
+            what,
+            existing: state.content.get(panelId) ?? [],
+          }),
+        })
+      } catch {
+        if (gen === genRef.current) setError("Lost the connection mid-drawing.")
+        return drawn
+      }
+      if (gen !== genRef.current) return drawn
+
+      // An error response still has a body, so without this check `readSse`
+      // below happily iterates the JSON error, finds no SSE frames, yields
+      // nothing, and the turn returns as though the panel had been drawn — the
+      // page then gets marked taught with an empty panel and nothing anywhere
+      // says why. Silent success is worse than a visible failure.
+      if (!res.ok) {
+        setError(await errorFrom(res, `Couldn't draw into “${panel.title}”.`))
+        return drawn
+      }
+      if (!res.body) {
+        setError(`Couldn't draw into “${panel.title}” — empty response.`)
+        return drawn
+      }
+
+      const draw = async (block: Block) => {
+        drawn.push(block)
+        await applyBlock(gen, page, state, panelId, block)
+      }
+
+      for await (const { event, data } of readSse(
+        res.body,
+        () => gen === genRef.current,
+      )) {
+        // The server has already validated and normalised each block.
+        if (event === "block") await draw(JSON.parse(data) as Block)
+        // `sseResponse` turns a mid-stream throw into this frame. Nothing read
+        // it before, so a stream that died halfway left a half-drawn panel and
+        // no explanation.
+        else if (event === "error") {
+          setError(messageFromErrorFrame(data, "The drawing stream failed."))
+          return drawn
+        }
+      }
+      return drawn
+    },
+    [applyBlock, canvas],
+  )
+
+  /** Types a snippet into the pane a line at a time. */
+  const showCode = useCallback(
+    async (gen: number, page: Page, label: string, lines: string[]) => {
+      const id = `${page.id}~${label}`
+      // How snippets are keyed by page is stated once, here, rather than being
+      // restated by every updater that touches the map.
+      const patch = (fn: (list: Snippet[]) => Snippet[]) =>
+        setCode((all) => ({ ...all, [page.id]: fn(all[page.id] ?? []) }))
+
+      // Keyed by label so re-teaching a page after a question replaces its
+      // snippet rather than stacking a second copy underneath.
+      patch((list) => [...list.filter((s) => s.id !== id), { id, label, lines: [] }])
+
+      for (const line of lines) {
+        if (gen !== genRef.current) return
+        patch((list) =>
+          list.map((s) => (s.id === id ? { ...s, lines: [...s.lines, line] } : s)),
+        )
+        await wait(CODE_LINE_MS)
+      }
+    },
+    [],
+  )
+
+  /**
+   * Writes the page that just finished, so the lesson can be taught again for
+   * nothing.
+   *
+   * Per page rather than at the end: a learner who stops after three pages
+   * keeps three pages, which is also the three pages they paid for.
+   *
+   * Nothing here can fail the lesson. Saving is a convenience for later; the
+   * page has already been taught and the learner has already watched it, so a
+   * failed write is logged and dropped rather than shown as if the lesson broke.
+   */
+  const savePage = useCallback(async (page: Page, state: PageState) => {
+    // Replaying writes nothing. It is reading these very rows back.
+    if (replayingRef.current) return
+
+    const beats = beatsRef.current
+    beatsRef.current = []
+    if (!beats.length) return
+
+    try {
+      const res = await fetch("/api/lessons", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          lessonId: lessonIdRef.current,
+          topic: topicRef.current,
+          pages: pagesRef.current,
+          idx: pagesRef.current.findIndex((p) => p.id === page.id),
+          board: state.board,
+          beats,
+        }),
+      })
+      if (!res.ok) return
+      const { lessonId } = (await res.json()) as { lessonId?: string }
+      if (lessonId) lessonIdRef.current = lessonId
+    } catch {
+      // Offline, or the row was rejected. Either way the lesson continues.
+    }
+  }, [])
+
   const runTurn = useCallback(
-    async (gen: number) => {
+    async (gen: number, page: Page, state: PageState) => {
       setStatus("teaching")
       const controller = new AbortController()
       abortRef.current = controller
+
+      // Per turn, not per page. Asking a question re-teaches the page, and a
+      // learner three questions in should not find that the board has quietly
+      // stopped drawing because an earlier pass spent the page's allowance.
+      const beats: Beats = { left: MAX_PANEL_BEATS }
 
       let res: Response
       try {
@@ -121,37 +421,49 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            steps: stepsRef.current,
+            topic: topicRef.current,
+            pages: pagesRef.current,
             currentIndex: indexRef.current,
             transcript: transcriptRef.current,
-            board: boardRef.current,
+            board: state.board,
           }),
           signal: controller.signal,
         })
       } catch {
-        return // superseded by a newer turn, or a network error
+        // `cancel()` aborts this fetch whenever the learner moves on, and that
+        // is not a failure. A throw while this turn is still the current one is.
+        if (gen === genRef.current) setError("Couldn't reach the teacher.")
+        return
       }
-      if (gen !== genRef.current || !res.body) return
+      if (gen !== genRef.current) return
 
-      const parser = new NdjsonActionParser()
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ""
+      if (!res.ok) {
+        setError(await errorFrom(res, "The teacher couldn't start this page."))
+        return
+      }
+      if (!res.body) {
+        setError("The teacher returned an empty response.")
+        return
+      }
+
+      const parser = new LineParser(parseAction)
 
       // Beats must land in order — a sentence, then the thing it describes.
       // Actions arrive while the teacher is still talking, so they are chained
-      // rather than fired off in parallel the way the old loop did it.
+      // rather than fired off in parallel.
       let chain: Promise<void> = Promise.resolve()
 
       const handle = async (a: TeacherAction) => {
         if (gen !== genRef.current) return
         if (a.type === "speak") {
-          transcriptRef.current.push({ role: "assistant", text: a.text })
+          beatsRef.current.push({ kind: "speak", text: a.text })
+          remember(transcriptRef.current, { role: "assistant", text: a.text })
           // Let the previous sentence land before starting this one.
           await speakingRef.current
           if (gen !== genRef.current) return
 
           setCaption(a.text)
+          setSpoken((lines) => [...lines, a.text].slice(-TRANSCRIPT_WINDOW))
           // Deliberately NOT awaited: the drawing for this sentence should
           // happen while it is being said, not after it.
           speakingRef.current = narrator.speak(a.text).then(() => {
@@ -163,10 +475,21 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
             }
           })
           await wait(LEAD_MS)
+        } else if (a.type === "code") {
+          beatsRef.current.push({ kind: "code", label: a.label, lines: a.lines })
+          await showCode(gen, page, a.label, a.lines)
         } else if (a.type === "draw") {
-          if ("panel" in a) await drawPanel(gen, a.panel, a.what)
-          else {
-            canvas.current?.addConnector(a.connector)
+          if ("panel" in a) {
+            const blocks = await drawPanel(gen, page, state, beats, a.panel, a.what)
+            // Only if it actually drew. A beat that failed or was skipped for
+            // budget must not be written down as one that succeeded, or the
+            // replay would show a gap with no explanation for it.
+            if (blocks.length) {
+              beatsRef.current.push({ kind: "panel", panel: a.panel, blocks })
+            }
+          } else {
+            beatsRef.current.push({ kind: "connector", connector: a.connector })
+            canvas.current?.addConnector(page.id, state.layout, a.connector)
             await wait(SHAPE_MS * 2)
           }
         }
@@ -180,106 +503,296 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       }
 
       try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          if (gen !== genRef.current) {
-            await reader.cancel()
+        for await (const { event, data } of readSse(
+          res.body,
+          () => gen === genRef.current,
+        )) {
+          if (event === "text") {
+            const { delta } = JSON.parse(data)
+            for (const a of parser.push(delta)) enqueue(a)
+          } else if (event === "error") {
+            setError(messageFromErrorFrame(data, "The lesson stream failed."))
             return
-          }
-          buf += decoder.decode(value, { stream: true })
-          const frames = buf.split("\n\n")
-          buf = frames.pop() ?? ""
-          for (const f of frames) {
-            const ev = f.split("\n").find((l) => l.startsWith("event: "))?.slice(7)
-            const data = f.split("\n").find((l) => l.startsWith("data: "))?.slice(6)
-            if (ev === "text" && data) {
-              const { delta } = JSON.parse(data)
-              for (const a of parser.push(delta)) enqueue(a)
-            }
           }
         }
       } catch {
+        if (gen === genRef.current) setError("The lesson stream broke.")
         return
       }
       for (const a of parser.flush()) enqueue(a)
       await chain
       // The last sentence is still in the air after its shapes have landed.
-      // Don't step on it with the next question.
+      // Don't step on it with the next page.
       await speakingRef.current
+      if (gen !== genRef.current) return
+
+      setTaught((t) => (t.includes(page.id) ? t : [...t, page.id]))
+      canvas.current?.fitAll()
+      await savePage(page, state)
     },
-    [canvas, drawPanel, narrator],
+    [canvas, drawPanel, narrator, savePage, showCode],
   )
+
+  // The index the async loop reads and the index the UI renders are the same
+  // number, so they move together in one place rather than being paired up by
+  // hand at each of the three sites that advance the lesson.
+  const setIndex = useCallback((index: number) => {
+    indexRef.current = index
+    setCurrentIndex(index)
+  }, [])
 
   // Iterating rather than recursing is deliberate. The old loop called itself
   // from inside its own useCallback, so it ran the whole lesson through the
   // closure it was born with — which is why enabling voice mid-lesson never
   // took effect. A loop reads the current refs on every pass.
-  const runLesson = useCallback(
+  const runFrom = useCallback(
     async (gen: number) => {
       for (;;) {
-        await runTurn(gen)
-        if (gen !== genRef.current) return // superseded by a newer turn
-        if (indexRef.current >= stepsRef.current.length - 1) {
+        const page = pagesRef.current[indexRef.current]
+        if (!page) return
+        const state = await openPage(gen, page)
+        if (gen !== genRef.current) return
+        if (state) await runTurn(gen, page, state)
+        if (gen !== genRef.current) return
+
+        if (indexRef.current >= pagesRef.current.length - 1) {
           setStatus("done")
+          setCaption("That's the lesson. Pick any page from the outline to revisit it.")
           return
         }
-        indexRef.current += 1
-        setCurrentIndex(indexRef.current)
+        setIndex(indexRef.current + 1)
       }
     },
-    [runTurn],
+    [openPage, runTurn, setIndex],
   )
 
-  const beginTurn = useCallback(() => {
+  /**
+   * Everything a new generation means, in one place: nothing in flight may
+   * touch the board again, and the teacher stops mid-sentence. Spelled out at
+   * each call site, one of the four steps was always the one to be forgotten.
+   */
+  const cancel = useCallback(() => {
     genRef.current += 1
     abortRef.current?.abort()
-    return runLesson(genRef.current)
-  }, [runLesson])
+    narrator.stop()
+    speakingRef.current = Promise.resolve()
+  }, [narrator])
+
+  /** Cancels whatever is in flight and starts a new run from `indexRef`. */
+  const begin = useCallback(() => {
+    cancel()
+    // A new run is the learner's answer to whatever went wrong last time.
+    setError(null)
+    return runFrom(genRef.current)
+  }, [cancel, runFrom])
+
+  /**
+   * Teaches a stored lesson again, with no call to Anthropic at all.
+   *
+   * The board comes from `lesson_page.board` instead of /api/board, and every
+   * beat from `lesson_page.beats` instead of /api/teach and /api/draw-panel.
+   * What is left is narration, which is the cheap, fast half — and which the
+   * narrator already treats as optional if it fails.
+   *
+   * It runs through `applyBlock`, the same function the live path uses, so a
+   * replay is not an approximation of the lesson: it is the lesson, drawn from
+   * the same blocks in the same order.
+   */
+  const replayTurn = useCallback(
+    async (gen: number, page: Page, state: PageState, beats: StoredBeat[]) => {
+      setStatus("teaching")
+
+      for (const beat of beats) {
+        if (gen !== genRef.current) return
+
+        if (beat.kind === "speak") {
+          await speakingRef.current
+          if (gen !== genRef.current) return
+          setCaption(beat.text)
+          setSpoken((lines) => [...lines, beat.text].slice(-TRANSCRIPT_WINDOW))
+          speakingRef.current = narrator.speak(beat.text).then(() => {
+            if (narrator.blocked) {
+              setSoundBlocked(true)
+              return wait(dwell(beat.text))
+            }
+          })
+          await wait(LEAD_MS)
+        } else if (beat.kind === "code") {
+          await showCode(gen, page, beat.label, beat.lines)
+        } else if (beat.kind === "panel") {
+          canvas.current?.focus(page.id, state.layout, beat.panel)
+          for (const block of beat.blocks) {
+            if (gen !== genRef.current) return
+            await applyBlock(gen, page, state, beat.panel, block)
+          }
+        } else {
+          canvas.current?.addConnector(page.id, state.layout, beat.connector)
+          await wait(SHAPE_MS * 2)
+        }
+      }
+
+      await speakingRef.current
+      if (gen !== genRef.current) return
+      setTaught((t) => (t.includes(page.id) ? t : [...t, page.id]))
+      canvas.current?.fitAll()
+    },
+    [applyBlock, canvas, narrator, showCode],
+  )
+
+  /** Loads a stored lesson and plays it from the beginning. */
+  const replay = useCallback(
+    async (lessonId: string) => {
+      setStatus("planning")
+      setCaption("Loading the lesson…")
+      setError(null)
+
+      let stored: StoredLesson
+      try {
+        const res = await fetch(`/api/lessons/${encodeURIComponent(lessonId)}`)
+        if (!res.ok) {
+          setStatus("idle")
+          setError(await errorFrom(res, "Couldn't load that lesson."))
+          return
+        }
+        // Parsed rather than cast. These rows are jsonb and may have been
+        // written by an older shape of this app; the renderer is the wrong
+        // place to discover that.
+        const parsed = StoredLesson.safeParse(await res.json())
+        if (!parsed.success) {
+          setStatus("idle")
+          setError("That stored lesson can no longer be read.")
+          return
+        }
+        stored = parsed.data
+      } catch {
+        setStatus("idle")
+        setError("Couldn't reach the server to load that lesson.")
+        return
+      }
+
+      const gen = ++genRef.current
+      abortRef.current?.abort()
+      replayingRef.current = true
+      topicRef.current = stored.topic
+      pagesRef.current = stored.pages
+      stateRef.current.clear()
+      transcriptRef.current = []
+      setPages(stored.pages)
+      setIndex(0)
+      setTaught([])
+      setCode({})
+      setSpoken([])
+
+      for (const saved of stored.saved) {
+        if (gen !== genRef.current) return
+        const page = stored.pages[saved.idx]
+        if (!page) continue
+        setIndex(saved.idx)
+        const state = await openPage(gen, page, saved.board)
+        if (!state || gen !== genRef.current) return
+        await replayTurn(gen, page, state, saved.beats)
+      }
+
+      if (gen !== genRef.current) return
+      setStatus("done")
+      setCaption("That's the lesson. Pick any page from the outline to revisit it.")
+    },
+    [openPage, replayTurn, setIndex],
+  )
 
   const start = useCallback(
     async (topic: string) => {
       setStatus("planning")
       setCaption("Planning the lesson…")
+      setError(null)
+      topicRef.current = topic
 
-      const planRes = await fetch("/api/plan", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ topic }),
-      })
-      const { steps: planned } = (await planRes.json()) as { steps: Step[] }
+      // This fetch used to be unwrapped, so going offline rejected inside a
+      // form handler and surfaced as an unhandled promise rejection rather than
+      // as anything the learner could see.
+      let res: Response
+      try {
+        res = await fetch("/api/plan", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ topic }),
+        })
+      } catch {
+        setStatus("idle")
+        setError("Couldn't reach the server. Check your connection.")
+        return
+      }
 
-      setCaption("Designing the board…")
-      const boardRes = await fetch("/api/board", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ topic, steps: planned }),
-      })
-      const board = (await boardRes.json()) as Layout
+      if (!res.ok) {
+        setStatus("idle")
+        setError(await errorFrom(res, "Couldn't plan that lesson."))
+        return
+      }
 
-      stepsRef.current = planned
-      indexRef.current = 0
-      boardRef.current = board
-      drawnRef.current.clear()
-      setSteps(planned)
-      setCurrentIndex(0)
-      canvas.current?.reset(board)
+      let planned: Page[] | undefined
+      try {
+        ;({ pages: planned } = (await res.json()) as { pages: Page[] })
+      } catch {
+        setStatus("idle")
+        setError("The lesson plan came back malformed.")
+        return
+      }
+      if (!planned?.length) {
+        setStatus("idle")
+        setCaption("Couldn't plan that lesson. Try another topic.")
+        return
+      }
 
-      await beginTurn()
+      pagesRef.current = planned
+      stateRef.current.clear()
+      transcriptRef.current = []
+      // A fresh lesson is a fresh row, and it is being taught rather than read.
+      lessonIdRef.current = undefined
+      beatsRef.current = []
+      replayingRef.current = false
+      setPages(planned)
+      setIndex(0)
+      setTaught([])
+      setCode({})
+      setSpoken([])
+
+      await begin()
     },
-    [beginTurn, canvas],
+    [begin, setIndex],
+  )
+
+  /**
+   * Jump to any page in the outline. A page already taught is simply shown
+   * again — its canvas is still there, which is the point of pages.
+   */
+  const goTo = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= pagesRef.current.length) return
+      setIndex(index)
+
+      const page = pagesRef.current[index]
+      const state = stateRef.current.get(page.id)
+      if (state && taught.includes(page.id)) {
+        cancel()
+        canvas.current?.openPage(page.id, page.title, state.layout)
+        setStatus("done")
+        setCaption(page.summary)
+        return
+      }
+      void begin()
+    },
+    [begin, cancel, canvas, setIndex, taught],
   )
 
   const ask = useCallback(
     (text: string) => {
-      // The learner has cut in. Stop mid-sentence — carrying on talking over a
-      // question is the one thing a tutor must not do.
-      narrator.stop()
-      speakingRef.current = Promise.resolve()
-      transcriptRef.current.push({ role: "user", text })
-      void beginTurn()
+      // The learner has cut in. `begin` stops the teacher mid-sentence —
+      // carrying on talking over a question is the one thing a tutor must not
+      // do — and re-runs this page with the question in the transcript.
+      remember(transcriptRef.current, { role: "user", text })
+      void begin()
     },
-    [beginTurn, narrator],
+    [begin],
   )
 
   /** Only ever needed if the browser blocked autoplay — see `Narrator.blocked`. */
@@ -290,12 +803,18 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
 
   return {
     start,
+    replay,
     ask,
-    steps,
+    goTo,
+    pages,
     currentIndex,
+    taught,
     status,
     caption,
+    spoken,
+    error,
     soundBlocked,
     enableSound,
+    code: code[pages[currentIndex]?.id ?? ""] ?? [],
   }
 }

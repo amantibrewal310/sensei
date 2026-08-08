@@ -1,41 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk"
+import { env } from "./env"
 
+// The SDK client only. The SSE wire format lives in lib/sse.ts, which the
+// browser imports — it must not drag the Anthropic SDK into the client bundle.
+//
+// Reading the key through `env` rather than `process.env` is what makes all
+// four Claude routes validate their configuration transitively: they already
+// import this module, so an unset key fails here with a message that names it.
 export const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: env.ANTHROPIC_API_KEY,
 })
-
-export function sseResponse(
-  gen: AsyncGenerator<{ event: string; data: unknown }>,
-): Response {
-  const encoder = new TextEncoder()
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        for await (const { event, data } of gen) {
-          controller.enqueue(
-            encoder.encode(
-              `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
-            ),
-          )
-        }
-      } catch (err) {
-        controller.enqueue(
-          encoder.encode(
-            `event: error\ndata: ${JSON.stringify({
-              message: err instanceof Error ? err.message : "stream error",
-            })}\n\n`,
-          ),
-        )
-      } finally {
-        controller.close()
-      }
-    },
-  })
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    },
-  })
-}

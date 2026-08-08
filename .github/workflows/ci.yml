@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A second push to the same branch makes the first run's answer irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Single source of truth with local dev, rather than a version pinned
+          # here that drifts from whatever .nvmrc says.
+          node-version-file: .nvmrc
+          cache: npm
+
+      # `ci` rather than `install`: the lockfile is the point of running this at
+      # all. `install` would happily resolve a different toolchain, since
+      # typescript, eslint and tailwind are all declared as wide `^` majors.
+      - run: npm ci
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+
+      - run: npm run build
+        env:
+          # There are no secrets in CI, and `next build` imports every route to
+          # collect page data. Without this the build fails on configuration
+          # rather than on anything wrong with the code. See lib/env.ts.
+          SKIP_ENV_VALIDATION: "1"
