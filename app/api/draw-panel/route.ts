@@ -6,6 +6,7 @@ import { PANEL_MODEL } from "@/lib/models"
 import { PANEL_SYSTEM } from "@/lib/prompts"
 import { Block, describeBlocks, dropRedundantLabel, parseBlock } from "@/lib/blocks"
 import { readBody } from "@/lib/request"
+import { requireApproved } from "@/lib/guard"
 import { logUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
@@ -35,6 +36,11 @@ const DrawPanelRequest = z.object({
 // answer, and the repairs were what you saw on the board. There is nothing to
 // repair now: a block cannot express a position, so it cannot express a bad one.
 export async function POST(req: Request) {
+  // Before the body is even read: an unapproved caller does not get to hand
+  // this route work, and every path past here costs money.
+  const gate = await requireApproved()
+  if (!gate.ok) return gate.response
+
   const body = await readBody(req, DrawPanelRequest)
   if (!body.ok) return body.response
   // Parsing rather than hand-checking also retires the `panelTitle` const that

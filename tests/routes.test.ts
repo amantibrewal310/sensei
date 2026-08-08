@@ -11,10 +11,27 @@ vi.mock("@/lib/anthropic", () => ({
   anthropic: { messages: { create, stream } },
 }))
 
+// The second stub, and the seam is chosen deliberately: `auth` is replaced,
+// `lib/guard` is not. These tests run the real guard against a real session
+// shape, so the day the session stops carrying `status` they go red here rather
+// than opening the routes to everyone in silence. What the guard does when the
+// answer is no is tests/guard.test.ts.
+const APPROVED = {
+  id: "u_test",
+  email: "learner@example.com",
+  status: "approved",
+  role: "user",
+}
+let currentUser: Record<string, unknown> | null = APPROVED
+vi.mock("@/lib/auth", () => ({
+  auth: async () => (currentUser ? { user: currentUser } : null),
+}))
+
 const { POST: plan } = await import("@/app/api/plan/route")
 const { POST: board } = await import("@/app/api/board/route")
 const { POST: teach } = await import("@/app/api/teach/route")
 const { POST: drawPanel } = await import("@/app/api/draw-panel/route")
+const { POST: speak } = await import("@/app/api/speak/route")
 
 const USAGE = {
   input_tokens: 100,
@@ -111,8 +128,43 @@ const A_PLAN = JSON.stringify({
 
 beforeEach(() => {
   vi.clearAllMocks()
+  currentUser = APPROVED
   // logUsage writes a line per call, which is wanted in production and noise here.
   vi.spyOn(console, "log").mockImplementation(() => {})
+})
+
+describe("the gate, on every route that spends money", () => {
+  // Written as a table rather than per route because the failure it is for is
+  // a new route landing without the guard, and a table is the only shape where
+  // adding the route to this file and forgetting the guard cannot both happen
+  // quietly. `speak` is here for the same reason it is guarded: it is the only
+  // route that bills OpenAI rather than Anthropic, which is exactly how a route
+  // gets overlooked.
+  const ROUTES: [string, (req: Request) => Promise<Response>, unknown][] = [
+    ["/api/plan", plan, { topic: "closures" }],
+    ["/api/board", board, { topic: "closures", page: PAGE }],
+    ["/api/teach", teach, { topic: "closures", pages: [PAGE], index: 0 }],
+    ["/api/draw-panel", drawPanel, { topic: "closures", panelTitle: "A", what: "b" }],
+    ["/api/speak", speak, { text: "hello" }],
+  ]
+
+  for (const [name, route, body] of ROUTES) {
+    it(`${name} refuses a caller who is not signed in`, async () => {
+      currentUser = null
+      const res = await post(route, body)
+      expect(res.status).toBe(401)
+      expect(create).not.toHaveBeenCalled()
+      expect(stream).not.toHaveBeenCalled()
+    })
+
+    it(`${name} refuses a caller still waiting for approval`, async () => {
+      currentUser = { ...APPROVED, status: "pending" }
+      const res = await post(route, body)
+      expect(res.status).toBe(403)
+      expect(create).not.toHaveBeenCalled()
+      expect(stream).not.toHaveBeenCalled()
+    })
+  }
 })
 
 describe("/api/plan", () => {
