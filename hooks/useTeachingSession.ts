@@ -114,6 +114,10 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   const [code, setCode] = useState<Record<string, Snippet[]>>({})
   const [status, setStatus] = useState<Status>("idle")
   const [caption, setCaption] = useState("")
+  // The caption is replaced by the next sentence, so on its own it is a lesson
+  // you cannot look back at. This is the same text kept, and it is what makes
+  // the spoken half of the lesson readable rather than merely audible.
+  const [spoken, setSpoken] = useState<string[]>([])
   // Separate from `caption`, which is the lesson talking. This is the app
   // admitting something went wrong, and it must not be overwritten by the next
   // sentence the teacher happens to emit.
@@ -379,6 +383,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
           if (gen !== genRef.current) return
 
           setCaption(a.text)
+          setSpoken((lines) => [...lines, a.text].slice(-TRANSCRIPT_WINDOW))
           // Deliberately NOT awaited: the drawing for this sentence should
           // happen while it is being said, not after it.
           speakingRef.current = narrator.speak(a.text).then(() => {
@@ -541,6 +546,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       setIndex(0)
       setTaught([])
       setCode({})
+      setSpoken([])
 
       await begin()
     },
@@ -596,6 +602,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
     taught,
     status,
     caption,
+    spoken,
     error,
     soundBlocked,
     enableSound,

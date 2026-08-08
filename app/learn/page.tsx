@@ -62,7 +62,14 @@ function LearnInner() {
         </div>
 
         <div className="flex min-h-0 flex-1">
-          <div className="relative min-w-0 flex-1">
+          {/* The board is a canvas: to anything that is not an eye it is one
+              opaque element. The label says what it is, and the transcript
+              below carries what it was drawn to illustrate. */}
+          <div
+            className="relative min-w-0 flex-1"
+            role="img"
+            aria-label={`Whiteboard for “${session.pages[session.currentIndex]?.title ?? "the lesson"}”`}
+          >
             <Board api={canvas} />
           </div>
           <CodePane snippets={session.code} />
@@ -82,9 +89,34 @@ function LearnInner() {
         )}
 
         <div className="min-h-16 border-t border-neutral-200 bg-white px-6 py-4">
-          <p className="mx-auto max-w-3xl text-center text-lg leading-snug text-neutral-800">
+          {/* The lesson is audio and canvas, so this line is the only part of
+              it a screen reader can reach. `polite` rather than `assertive`:
+              sentences arrive every few seconds and interrupting the reader
+              each time would make it unusable. */}
+          <p
+            role="status"
+            aria-live="polite"
+            className="mx-auto max-w-3xl text-center text-lg leading-snug text-neutral-800"
+          >
             {session.caption}
           </p>
+
+          {/* Closed by default — the lesson is meant to be watched. Open, it
+              answers "what did it just say", which is the same question a
+              screen reader user has and a distracted one does too. `summary`
+              is focusable on its own, so this needs no keyboard handling. */}
+          {session.spoken.length > 0 && (
+            <details className="mx-auto mt-2 max-w-3xl text-sm text-neutral-500">
+              <summary className="cursor-pointer text-center">
+                What was said ({session.spoken.length})
+              </summary>
+              <ol className="mt-2 space-y-1">
+                {session.spoken.map((line, i) => (
+                  <li key={`${i}-${line.slice(0, 24)}`}>{line}</li>
+                ))}
+              </ol>
+            </details>
+          )}
         </div>
 
         <form
@@ -97,7 +129,13 @@ function LearnInner() {
             }
           }}
         >
+          {/* A placeholder is not a label: it disappears the moment anyone
+              types, and it is not what a screen reader announces the field by. */}
+          <label className="sr-only" htmlFor="ask">
+            Ask a question about this page
+          </label>
           <input
+            id="ask"
             className="flex-1 rounded border border-neutral-300 p-2"
             placeholder="Ask a question…"
             value={ask}
