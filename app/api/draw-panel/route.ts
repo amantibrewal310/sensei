@@ -1,25 +1,27 @@
-import { NextResponse } from "next/server"
+import { z } from "zod"
 import { anthropic } from "@/lib/anthropic"
 import { sseResponse } from "@/lib/sse"
 import { LineParser } from "@/lib/ndjson"
 import { PANEL_MODEL } from "@/lib/models"
 import { PANEL_SYSTEM } from "@/lib/prompts"
-import {
-  describeBlocks,
-  dropRedundantLabel,
-  parseBlock,
-  type Block,
-} from "@/lib/blocks"
+import { Block, describeBlocks, dropRedundantLabel, parseBlock } from "@/lib/blocks"
+import { readBody } from "@/lib/request"
 
 export const runtime = "nodejs"
 
-interface Body {
-  title: string
-  note: string
-  what: string
-  /** The blocks this panel already holds, so the model adds rather than repeats. */
-  existing: Block[]
-}
+const DrawPanelRequest = z.object({
+  title: z.string().min(1).max(200),
+  note: z.string().max(500).default(""),
+  what: z.string().min(1).max(1000),
+  /**
+   * The blocks this panel already holds, so the model adds rather than repeats.
+   *
+   * Previously accepted on the strength of `Array.isArray()` alone and passed
+   * straight to `describeBlocks`, which JSON-stringifies each element into the
+   * prompt — so anything at all could be put in front of the model here.
+   */
+  existing: z.array(Block).max(40).default([]),
+})
 
 // Streams BLOCKS, not shapes.
 //
@@ -30,19 +32,12 @@ interface Body {
 // answer, and the repairs were what you saw on the board. There is nothing to
 // repair now: a block cannot express a position, so it cannot express a bad one.
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => null)) as Body | null
-  const title = body?.title
-  const what = body?.what
-  const note = body?.note ?? ""
-  const existing = Array.isArray(body?.existing) ? body.existing : []
-
-  if (typeof title !== "string" || typeof what !== "string" || !what.trim()) {
-    return NextResponse.json({ error: "invalid panel request" }, { status: 400 })
-  }
-
-  // `gen` below is a hoisted declaration, so it does not see the narrowing the
-  // guard just did — this const carries it in.
-  const panelTitle: string = title
+  const body = await readBody(req, DrawPanelRequest)
+  if (!body.ok) return body.response
+  // Parsing rather than hand-checking also retires the `panelTitle` const that
+  // used to live here: `title` was `string | undefined` narrowed by a guard, and
+  // the hoisted `gen` below could not see the narrowing. It arrives as a string.
+  const { title, note, what, existing } = body.data
 
   const alreadyThere = existing.length
     ? `This panel already holds these blocks, in order. Add BELOW them, and do not repeat them:\n${describeBlocks(existing)}`
@@ -72,7 +67,7 @@ export async function POST(req: Request) {
     // here. A second consumer, or a replay of stored blocks, gets it too.
     const parser = new LineParser((line: string) => {
       const block = parseBlock(line)
-      return block && dropRedundantLabel(block, panelTitle)
+      return block && dropRedundantLabel(block, title)
     })
 
     for await (const ev of stream) {

@@ -1,36 +1,47 @@
-import { NextResponse } from "next/server"
+import { z } from "zod"
 import { anthropic } from "@/lib/anthropic"
 import { sseResponse } from "@/lib/sse"
 import { TEACHER_MODEL } from "@/lib/models"
 import { TEACHER_SYSTEM } from "@/lib/prompts"
-import { describeBoard, type Board } from "@/lib/board"
-import { PAGE_KIND, type Page } from "@/lib/lesson"
+import { BoardSchema, describeBoard } from "@/lib/board"
+import { PAGE_KIND, PageSchema, Topic } from "@/lib/lesson"
+import { readBody } from "@/lib/request"
 
 export const runtime = "nodejs"
 
-interface Body {
-  topic: string
-  pages: Page[]
-  currentIndex: number
-  transcript: { role: "user" | "assistant"; text: string }[]
-  board: Board
-}
+// The transcript is resent in full on every turn, so its bound is a cost
+// control, not a formality: an unbounded array here is an unbounded prompt
+// billed once per beat. The client caps it too; this is the backstop for when
+// the client is not this app.
+const MAX_TRANSCRIPT = 40
+
+const TeachRequest = z
+  .object({
+    topic: Topic,
+    pages: z.array(PageSchema).min(1).max(12),
+    currentIndex: z.number().int().min(0),
+    transcript: z
+      .array(
+        z.object({
+          role: z.enum(["user", "assistant"]),
+          text: z.string().min(1).max(4000),
+        }),
+      )
+      .max(MAX_TRANSCRIPT)
+      .default([]),
+    board: BoardSchema,
+  })
+  // `pages[currentIndex]` was checked by hand before and is the one cross-field
+  // invariant here — an index past the end used to reach `current.title`.
+  .refine((b) => b.currentIndex < b.pages.length, {
+    message: "currentIndex is past the end of pages",
+    path: ["currentIndex"],
+  })
 
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => null)) as Body | null
-  const pages = body?.pages
-  const currentIndex = body?.currentIndex
-  const transcript = body?.transcript ?? []
-  const board = body?.board
-
-  if (
-    !Array.isArray(pages) ||
-    typeof currentIndex !== "number" ||
-    !pages[currentIndex] ||
-    !board
-  ) {
-    return NextResponse.json({ error: "invalid teach request" }, { status: 400 })
-  }
+  const body = await readBody(req, TeachRequest)
+  if (!body.ok) return body.response
+  const { pages, currentIndex, transcript, board } = body.data
 
   const current = pages[currentIndex]
 
@@ -48,7 +59,7 @@ export async function POST(req: Request) {
   const rule = PAGE_KIND[current.kind].teachingRule
 
   const context =
-    `Lesson topic: ${body?.topic ?? ""}\n\nThe lesson's outline:\n${outline}\n\n` +
+    `Lesson topic: ${body.data.topic}\n\nThe lesson's outline:\n${outline}\n\n` +
     `This page is "${current.title}" (${current.kind}). ` +
     `The question to work through: ${current.question}\n` +
     (rule ? `\n${rule}\n` : "") +
