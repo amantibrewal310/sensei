@@ -22,8 +22,7 @@ function badRequest(error: z.ZodError): NextResponse {
 }
 
 type Read<S extends z.ZodType> =
-  | { ok: true; data: z.infer<S> }
-  | { ok: false; response: NextResponse }
+  { ok: true; data: z.infer<S> } | { ok: false; response: NextResponse }
 
 /**
  * Parses a JSON request body against `schema`.
@@ -43,10 +42,7 @@ export async function readBody<S extends z.ZodType>(
   } catch {
     return {
       ok: false,
-      response: NextResponse.json(
-        { error: "expected a JSON body" },
-        { status: 400 },
-      ),
+      response: NextResponse.json({ error: "expected a JSON body" }, { status: 400 }),
     }
   }
 

@@ -2,7 +2,7 @@
 
 ## The one architectural rule
 
-**The model never picks a pixel.** The LLM names a *relationship* — these things flow into each
+**The model never picks a pixel.** The LLM names a _relationship_ — these things flow into each
 other, this contains those, these two sit opposite each other — and code turns that into rectangles
 (`lib/render.ts`, `lib/layout.ts`). There is no coordinate anywhere in a model's output, and there
 must never be one: overlap and overflow are not prevented here, they are unrepresentable, and that

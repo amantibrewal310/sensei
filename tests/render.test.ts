@@ -1,12 +1,7 @@
 import { describe, it, expect } from "vitest"
 import type { Block } from "@/lib/blocks"
 import { charsPerLine, labelSize, longestWord, wrap } from "@/lib/measure"
-import {
-  MAX_PANEL_W,
-  naturalPanelSize,
-  renderBlock,
-  renderPanel,
-} from "@/lib/render"
+import { MAX_PANEL_W, naturalPanelSize, renderBlock, renderPanel } from "@/lib/render"
 import type { BoxShape, PanelShape } from "@/lib/shapes"
 import { item, items } from "./fixtures"
 
@@ -159,9 +154,7 @@ describe("renderPanel", () => {
 
   it("never grows past its max width", () => {
     for (let n = 1; n <= blocks.length; n++) {
-      expect(naturalPanelSize(blocks.slice(0, n)).width).toBeLessThanOrEqual(
-        MAX_PANEL_W,
-      )
+      expect(naturalPanelSize(blocks.slice(0, n)).width).toBeLessThanOrEqual(MAX_PANEL_W)
     }
   })
 })

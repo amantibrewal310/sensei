@@ -66,24 +66,20 @@ describe("BoardSchema", () => {
   })
 
   it("rejects a negative slot, which would index backwards into the grid", () => {
-    expect(BoardSchema.safeParse({ panels: [{ ...panel, col: -1 }] }).success).toBe(
-      false,
-    )
+    expect(BoardSchema.safeParse({ panels: [{ ...panel, col: -1 }] }).success).toBe(false)
   })
 
   it("rejects a non-integer slot", () => {
-    expect(
-      BoardSchema.safeParse({ panels: [{ ...panel, row: 1.5 }] }).success,
-    ).toBe(false)
-    expect(
-      BoardSchema.safeParse({ panels: [{ ...panel, col: "0" }] }).success,
-    ).toBe(false)
+    expect(BoardSchema.safeParse({ panels: [{ ...panel, row: 1.5 }] }).success).toBe(
+      false,
+    )
+    expect(BoardSchema.safeParse({ panels: [{ ...panel, col: "0" }] }).success).toBe(
+      false,
+    )
   })
 
   it("rejects a board with no panels at all", () => {
-    expect(BoardSchema.safeParse({ panels: [], connectors: [] }).success).toBe(
-      false,
-    )
+    expect(BoardSchema.safeParse({ panels: [], connectors: [] }).success).toBe(false)
   })
 
   it("leaves off-grid slots to placePanels rather than rejecting the board", () => {

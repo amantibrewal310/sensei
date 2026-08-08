@@ -1,6 +1,5 @@
 export type DrawAction =
-  | { type: "draw"; panel: string; what: string }
-  | { type: "draw"; connector: string }
+  { type: "draw"; panel: string; what: string } | { type: "draw"; connector: string }
 
 export type TeacherAction =
   | { type: "speak"; text: string }

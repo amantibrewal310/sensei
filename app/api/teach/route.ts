@@ -102,7 +102,12 @@ export async function POST(req: Request) {
     // went past unread. The SDK accumulates them regardless, so asking for the
     // final message after iterating costs nothing and is the only way to see
     // whether the cache_control marker above is doing anything.
-    logUsage("teach", TEACHER_MODEL, (await stream.finalMessage()).usage, Date.now() - started)
+    logUsage(
+      "teach",
+      TEACHER_MODEL,
+      (await stream.finalMessage()).usage,
+      Date.now() - started,
+    )
 
     yield { event: "end", data: {} }
   }

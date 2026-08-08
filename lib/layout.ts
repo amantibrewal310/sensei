@@ -39,10 +39,7 @@ export type PanelContent = ReadonlyMap<string, Block[]>
  * type, rather than being open-coded at each of the five call sites that need
  * it — each of which was also deciding independently what a miss means.
  */
-export function panelById(
-  layout: Layout,
-  id: string,
-): PlacedPanel | undefined {
+export function panelById(layout: Layout, id: string): PlacedPanel | undefined {
   return layout.panels.find((p) => p.id === id)
 }
 

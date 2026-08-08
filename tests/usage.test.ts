@@ -31,10 +31,7 @@ describe("costMicros", () => {
 
   it("bills cache reads at a tenth of the input rate", () => {
     for (const model of MODELS) {
-      const cached = costMicros(
-        model,
-        usage({ cache_read_input_tokens: 1_000_000 }),
-      )
+      const cached = costMicros(model, usage({ cache_read_input_tokens: 1_000_000 }))
       const fresh = costMicros(model, usage({ input_tokens: 1_000_000 }))
       expect(cached * 10).toBe(fresh)
     }
@@ -42,10 +39,7 @@ describe("costMicros", () => {
 
   it("bills cache writes at 1.25x the input rate", () => {
     for (const model of MODELS) {
-      const written = costMicros(
-        model,
-        usage({ cache_creation_input_tokens: 1_000_000 }),
-      )
+      const written = costMicros(model, usage({ cache_creation_input_tokens: 1_000_000 }))
       const fresh = costMicros(model, usage({ input_tokens: 1_000_000 }))
       expect(written).toBe(fresh * 1.25)
     }

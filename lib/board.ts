@@ -64,10 +64,7 @@ export function describeBoard(board: Board): {
       .map((p) => `- panel "${p.id}" — ${p.title}: ${p.note}`)
       .join("\n"),
     connectors: board.connectors
-      .map(
-        (c) =>
-          `- connector "${c.id}" — ${c.from} to ${c.to}, labelled "${c.label}"`,
-      )
+      .map((c) => `- connector "${c.id}" — ${c.from} to ${c.to}, labelled "${c.label}"`)
       .join("\n"),
   }
 }

@@ -86,9 +86,7 @@ async function errorFrom(res: Response, fallback: string): Promise<string> {
 function messageFromErrorFrame(data: string, fallback: string): string {
   try {
     const body = JSON.parse(data) as { message?: unknown }
-    return typeof body.message === "string" && body.message
-      ? body.message
-      : fallback
+    return typeof body.message === "string" && body.message ? body.message : fallback
   } catch {
     return fallback
   }
@@ -309,10 +307,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
 
       // Keyed by label so re-teaching a page after a question replaces its
       // snippet rather than stacking a second copy underneath.
-      patch((list) => [
-        ...list.filter((s) => s.id !== id),
-        { id, label, lines: [] },
-      ])
+      patch((list) => [...list.filter((s) => s.id !== id), { id, label, lines: [] }])
 
       for (const line of lines) {
         if (gen !== genRef.current) return
