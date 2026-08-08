@@ -9,9 +9,10 @@
 /build
 
 # env
-.env
-.env.local
-.env*.local
+# `.env` matched only that exact name and `.env*.local` needed the .local
+# suffix, so `.env.production` fell through both and was committable.
+.env*
+!.env*.example
 
 # misc
 .DS_Store
