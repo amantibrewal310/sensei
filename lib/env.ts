@@ -10,7 +10,9 @@ import { z } from "zod"
 // nor the fact that it was missing. A key you forgot to set should say so.
 //
 // Server-only. Nothing here may be imported from a "use client" module — these
-// are secrets, and there are no NEXT_PUBLIC_ variables in this app by design.
+// are secrets. The one exception to "no NEXT_PUBLIC_ variables" is the tldraw
+// license key, which is public by design and therefore lives with the
+// component that ships it to the browser — see components/Board.tsx.
 const EnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1),
   OPENAI_API_KEY: z.string().min(1),

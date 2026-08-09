@@ -100,7 +100,9 @@ Speaker         ◄── OpenAI TTS, played back one sentence at a time
   the next page load instead of on the next sign-out.
 
 Used under the tldraw SDK license, which requires the "Made with tldraw" watermark to remain on the
-canvas.
+canvas — and, in production, a license key: the SDK unmounts itself in unlicensed production builds.
+The free tier's key (`NEXT_PUBLIC_TLDRAW_LICENSE_KEY`) keeps the watermark and is enough for a
+pilot.
 
 ## Getting started
 
@@ -119,6 +121,7 @@ AUTH_GOOGLE_ID      # Google OAuth client (Web application)
 AUTH_GOOGLE_SECRET
 ADMIN_EMAIL         # approved on sign-in; approves everyone else
 RESEND_API_KEY      # the "someone is waiting for approval" email
+NEXT_PUBLIC_TLDRAW_LICENSE_KEY   # tldraw's production gate — free tier keeps the watermark
 ```
 
 `lib/env.ts` validates all of it at boot and names what is missing and what it was for, rather than

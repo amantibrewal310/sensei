@@ -283,6 +283,15 @@ export function Board({ api }: { api: Ref<CanvasApi> }) {
     <div ref={containerRef} className="h-full w-full [&_.tl-canvas]:pointer-events-none">
       <Tldraw
         hideUi
+        // The one NEXT_PUBLIC_ variable in the app, and it does not weaken the
+        // "no NEXT_PUBLIC_" rule in lib/env.ts: a tldraw license key is not a
+        // secret. It is domain-locked and designed to ship in the client
+        // bundle, and the component that needs it runs in the browser, so
+        // there is nowhere server-side to keep it. Unset, development still
+        // works — but a production build is where the unlicensed gate below
+        // unmounts the editor on a timer, so a deploy without this key is a
+        // lesson that dies mid-page. The free tier's key keeps the watermark.
+        licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
         onMount={(editor) => {
           editorRef.current = editor
           // The canvas is resized by the code pane appearing beside it, not
