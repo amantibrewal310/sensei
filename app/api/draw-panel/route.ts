@@ -7,7 +7,7 @@ import { PANEL_SYSTEM } from "@/lib/prompts"
 import { Block, describeBlocks, dropRedundantLabel, parseBlock } from "@/lib/blocks"
 import { readBody } from "@/lib/request"
 import { withGuard } from "@/lib/guard"
-import { recordModelUsage } from "@/lib/usage"
+import { foldUsage, recordModelUsage, type TokenUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
 // Vercel Hobby: 10s default, 60s ceiling. See app/api/plan/route.ts.
@@ -57,18 +57,28 @@ export const POST = withGuard(ROUTE, async (req, user) => {
 
   async function* gen() {
     const started = Date.now()
-    const stream = anthropic.messages.stream({
-      model: PANEL_MODEL,
-      max_tokens: 2000,
-      system: [
-        {
-          type: "text",
-          text: PANEL_SYSTEM,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      messages: [{ role: "user", content: userText }],
-    })
+    const stream = anthropic.messages.stream(
+      {
+        model: PANEL_MODEL,
+        max_tokens: 2000,
+        // On this model, leaving `thinking` unset runs adaptive thinking — so
+        // the app's most frequent call was deliberating over a task that is
+        // one or two JSON lines, spending tokens from the same 2000 the
+        // blocks come out of. Low effort keeps thinking legal and minimal.
+        // The prefix cache is unaffected: effort is not part of the prompt.
+        output_config: { effort: "low" },
+        system: [
+          {
+            type: "text",
+            text: PANEL_SYSTEM,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+        messages: [{ role: "user", content: userText }],
+      },
+      // Abandoned whenever the learner moves on mid-drawing; see /api/teach.
+      { signal: req.signal },
+    )
 
     // Normalised here, at the producer, rather than by whoever happens to be
     // reading the stream — the rule ("a stack heading must not repeat the frame
@@ -79,24 +89,47 @@ export const POST = withGuard(ROUTE, async (req, user) => {
       return block && dropRedundantLabel(block, title)
     })
 
-    for await (const ev of stream) {
-      if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
-        for (const block of parser.push(ev.delta.text)) {
-          yield { event: "block", data: block }
+    // Folded in as it streams and recorded in a finally, so a drawing the
+    // learner abandoned mid-beat still lands in usage_event — see /api/teach.
+    // Highest-volume call in the app, so this is also the line that says
+    // whether the panel prompt's cache is live.
+    const usage: TokenUsage = { input_tokens: 0, output_tokens: 0 }
+    let stop: string | null = null
+    try {
+      for await (const ev of stream) {
+        foldUsage(usage, ev)
+        if (ev.type === "message_delta") stop = ev.delta.stop_reason ?? stop
+        if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
+          for (const block of parser.push(ev.delta.text)) {
+            yield { event: "block", data: block }
+          }
         }
       }
+    } finally {
+      await recordModelUsage({
+        route: ROUTE,
+        userId: user.id,
+        model: PANEL_MODEL,
+        usage,
+        ms: Date.now() - started,
+      })
     }
     for (const block of parser.flush()) yield { event: "block", data: block }
 
-    // Highest-volume call in the app — one per drawing beat — so this is the
-    // line that says whether the panel prompt's cache is live.
-    await recordModelUsage({
-      route: ROUTE,
-      userId: user.id,
-      model: PANEL_MODEL,
-      usage: (await stream.finalMessage()).usage,
-      ms: Date.now() - started,
-    })
+    // A truncated or declined stream ends cleanly on the wire, and the line
+    // parser drops a trailing partial line by design — so running out of
+    // room used to be indistinguishable from the model simply drawing less.
+    if (stop === "max_tokens") {
+      yield {
+        event: "error",
+        data: { message: `Couldn't finish drawing into “${title}”.` },
+      }
+      return
+    }
+    if (stop === "refusal") {
+      yield { event: "error", data: { message: "The drawing was declined." } }
+      return
+    }
 
     yield { event: "done", data: {} }
   }

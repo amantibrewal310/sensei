@@ -71,16 +71,28 @@ function replies(text: string, stop_reason = "end_turn") {
 /**
  * What a streaming route sees. Split into two chunks on purpose — a parser that
  * only works when each line arrives whole is a parser that fails in production.
+ * Usage rides the stream the way it does on the wire: input and cache counts on
+ * message_start, cumulative output and stop_reason on message_delta — which is
+ * where the routes read them, because a turn the learner interrupted has no
+ * finalMessage() to ask afterwards.
  */
-function streams(text: string) {
+function streams(text: string, stop_reason = "end_turn") {
   const half = Math.ceil(text.length / 2)
   stream.mockReturnValue({
     async *[Symbol.asyncIterator]() {
+      yield {
+        type: "message_start",
+        message: { usage: { ...USAGE, output_tokens: 1 } },
+      }
       for (const chunk of [text.slice(0, half), text.slice(half)]) {
         yield { type: "content_block_delta", delta: { type: "text_delta", text: chunk } }
       }
+      yield {
+        type: "message_delta",
+        delta: { stop_reason },
+        usage: { output_tokens: USAGE.output_tokens },
+      }
     },
-    finalMessage: async () => ({ usage: USAGE }),
   })
 }
 
@@ -346,12 +358,22 @@ describe("/api/teach", () => {
         }
         throw new Error("upstream went away")
       },
-      finalMessage: async () => ({ usage: USAGE }),
     })
 
     const got = await frames(await post(teach, body))
     expect(got[got.length - 1].event).toBe("error")
     expect(JSON.parse(got[got.length - 1].data).message).toBe("upstream went away")
+  })
+
+  it("turns a page cut off at max_tokens into an error frame, not a taught page", async () => {
+    // Thinking and text share the max_tokens budget, so a turn can run out of
+    // room and still end *cleanly* on the wire. The error frame is what stops
+    // the client marking the page taught with half its beats — the hook test
+    // covers that an error frame never marks a page taught.
+    streams('{"type":"speak","text":"Hello."}\n', "max_tokens")
+    const got = await frames(await post(teach, body))
+    expect(got[got.length - 1].event).toBe("error")
+    expect(got.map((f) => f.event)).not.toContain("end")
   })
 
   it("refuses a transcript longer than it will resend", async () => {
@@ -406,6 +428,14 @@ describe("/api/draw-panel", () => {
     expect(got.map((f) => f.event)).toEqual(["block", "done"])
   })
 
+  it("says when the drawing ran out of room instead of pretending it finished", async () => {
+    // The line parser drops a trailing partial line by design, so truncation
+    // used to be indistinguishable from the model simply drawing less.
+    streams('{"kind":"note","text":"one","color":"black"}\n', "max_tokens")
+    const got = await frames(await post(drawPanel, body))
+    expect(got.map((f) => f.event)).toEqual(["block", "error"])
+  })
+
   it("drops a stack heading that only repeats the panel title", async () => {
     streams(
       '{"kind":"stack","label":"The Bucket","items":[{"text":"token","color":"black"}]}\n',
@@ -446,9 +476,10 @@ describe("what the spend cap will later read", () => {
     expect(inserted[0].costMicros).toBeGreaterThan(0)
   })
 
-  it("records a streaming call from the final message, not the deltas", async () => {
-    // The deltas carry no usage at all. Reading it means asking the SDK for the
-    // accumulated final message after the loop has finished.
+  it("records a streaming call from the stream's own events", async () => {
+    // Usage rides message_start and message_delta and is folded in as it
+    // passes. finalMessage() only exists for a turn that finished — and the
+    // turn most worth recording is the one the learner interrupted.
     streams("hello there")
     // The body has to be drained first: the generator that calls the model —
     // and then records what it cost — does not run until something reads it.
@@ -463,6 +494,61 @@ describe("what the spend cap will later read", () => {
     expect(inserted).toHaveLength(1)
     expect(inserted[0]).toMatchObject({ route: "teach", userId: "u_test" })
     expect(inserted[0].costMicros).toBeGreaterThan(0)
+  })
+
+  it("records a turn the learner interrupted, and aborts it upstream", async () => {
+    // Asking a question aborts /api/teach mid-stream — routine, not
+    // exceptional. The mock hangs after two events until the signal the route
+    // now passes upstream fires, the way a real SDK read settles when the
+    // request is torn down. Two things are being asserted: the abort reaches
+    // the model call (so it stops generating on our bill), and the spend
+    // still lands in usage_event — an interrupted turn used to record
+    // nothing, making it free as far as both caps were concerned.
+    let sawAbort = false
+    stream.mockImplementation((_params: unknown, opts: { signal?: AbortSignal }) => ({
+      async *[Symbol.asyncIterator]() {
+        yield { type: "message_start", message: { usage: USAGE } }
+        yield {
+          type: "content_block_delta",
+          delta: { type: "text_delta", text: '{"type":"speak"' },
+        }
+        await new Promise<never>((_, reject) => {
+          const abort = () => {
+            sawAbort = true
+            reject(new Error("Request was aborted."))
+          }
+          if (opts.signal?.aborted) abort()
+          else opts.signal?.addEventListener("abort", abort, { once: true })
+        })
+      },
+    }))
+
+    const interrupt = new AbortController()
+    const res = await teach(
+      new Request("http://localhost/api", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          topic: "closures",
+          pages: [PAGE],
+          currentIndex: 0,
+          board: BOARD,
+        }),
+        signal: interrupt.signal,
+      }),
+    )
+    expect(res.status).toBe(200)
+
+    const reading = frames(res)
+    interrupt.abort()
+    await reading
+
+    expect(sawAbort).toBe(true)
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0]).toMatchObject({
+      route: "teach",
+      inputTokens: USAGE.input_tokens,
+    })
   })
 
   it("records narration, which bills a different vendor entirely", async () => {

@@ -19,6 +19,11 @@ Effort key: **S** = under half a day, **M** = a day or two, **L** = several days
 
 ## Phase 1 — Correctness of the cost ledger and the taught mark (do first)
 
+> **Shipped 2026-08-09.** All four items landed: abort propagation + finally-recorded usage
+> (with a cancellation test verified red/green), the bounded limits query (verified against
+> Neon — bounded and unbounded forms agree), truncation/refusal error frames + `effort: "low"`
+> on draw-panel + teach raised to 8000 tokens, and the doc-reference fix.
+
 The theme: the two invariants the app itself declares — *"a call that is not recorded is free forever"* and *"never mark a page taught on a path that did not teach it"* — currently have holes. Close them.
 
 ### 1.1 Record and stop interrupted streams (finding 2.1) — **M**

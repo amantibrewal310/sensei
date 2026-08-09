@@ -1,3 +1,4 @@
+import type Anthropic from "@anthropic-ai/sdk"
 import { PRICES, type ModelId } from "./models"
 import { db, usageEvents } from "@/lib/db"
 
@@ -21,6 +22,27 @@ export interface TokenUsage {
   output_tokens: number
   cache_creation_input_tokens?: number | null
   cache_read_input_tokens?: number | null
+}
+
+/**
+ * Folds one streaming event's usage into a running total.
+ *
+ * The streaming routes used to read usage from `finalMessage()` after their
+ * event loop — which does not exist for a turn the learner interrupted: the
+ * generator is shut down at its yield point and `finalMessage` rejects, so the
+ * call vanished from `usage_event` and was free as far as every cap was
+ * concerned. The wire already carries what the ledger needs — `message_start`
+ * has the input and cache counts, each `message_delta` the cumulative output
+ * count — so folding them in as they pass means an abandoned turn still has
+ * numbers to record. Exact for input; short only by whatever the model had
+ * not yet streamed at the moment of the abort.
+ */
+export function foldUsage(into: TokenUsage, ev: Anthropic.MessageStreamEvent): void {
+  if (ev.type === "message_start") {
+    Object.assign(into, ev.message.usage)
+  } else if (ev.type === "message_delta") {
+    into.output_tokens = ev.usage.output_tokens
+  }
 }
 
 /** Cache reads bill at a tenth of the input rate; writes at 1.25x (5-minute TTL). */

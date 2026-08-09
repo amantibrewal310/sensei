@@ -16,25 +16,49 @@ const DATA = "data: "
 
 export function sseResponse(gen: AsyncGenerator<Frame>): Response {
   const encoder = new TextEncoder()
+  // Flipped when the client goes away mid-stream — which is routine, not
+  // exceptional: the learner asking a question aborts the in-flight turn.
+  // Without `cancel` below, the generator was abandoned at its yield point and
+  // its finally blocks never ran — and the routes record what a model call
+  // cost in a finally, so every interrupted turn vanished from usage_event
+  // and was free as far as both spend caps were concerned.
+  let gone = false
+
   const stream = new ReadableStream({
     async start(controller) {
-      try {
-        for await (const { event, data } of gen) {
+      const send = (event: string, data: unknown) => {
+        if (gone) return
+        try {
           controller.enqueue(
             encoder.encode(`${EVENT}${event}\n${DATA}${JSON.stringify(data)}\n\n`),
           )
+        } catch {
+          // Cancelled between reads. Stop writing; `cancel` does the cleanup.
+          gone = true
+        }
+      }
+
+      try {
+        for await (const { event, data } of gen) {
+          // Breaking out of for-await calls gen.return() itself, so the
+          // generator's finally runs on this path too.
+          if (gone) break
+          send(event, data)
         }
       } catch (err) {
-        controller.enqueue(
-          encoder.encode(
-            `${EVENT}error\n${DATA}${JSON.stringify({
-              message: err instanceof Error ? err.message : "stream error",
-            })}\n\n`,
-          ),
-        )
+        send("error", {
+          message: err instanceof Error ? err.message : "stream error",
+        })
       } finally {
-        controller.close()
+        if (!gone) controller.close()
       }
+    },
+    async cancel() {
+      gone = true
+      // Runs the generator's finally blocks. If it is suspended mid-await on
+      // the model, the abort signal the routes pass upstream settles that
+      // await first — the two halves of one shutdown.
+      await gen.return(undefined)
     },
   })
   return new Response(stream, {

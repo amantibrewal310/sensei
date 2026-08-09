@@ -60,6 +60,18 @@ export type Denial = { reason: string; retryable: boolean }
  * in flight at once, which for this app is one lesson. That is an acceptable
  * error for a cost backstop and would not be for a DoS defence; this is the
  * former.
+ *
+ * The outer WHERE is what keeps this scan bounded. The month and rate-window
+ * predicates in the FILTER clauses cannot limit what is read — they only
+ * decide what is counted — so without it every model call scanned the table's
+ * entire history, growing forever. `least(...)` rather than the month alone
+ * because for the first sixty seconds of a month the rate window reaches into
+ * the previous one, and a WHERE that cut it off would briefly under-count
+ * `recent` at exactly the boundary. Verified against Neon: the bounded and
+ * unbounded forms return identical totals, and the predicate lands on the
+ * scan itself — a seq scan while the table is tiny (correctly; the planner
+ * switches to usage_event_created_idx as it grows), where the FILTER-only
+ * form gave the planner nothing to bound the scan with at any size.
  */
 export async function checkLimits(userId: string): Promise<Denial | null> {
   const rows = await db.execute<{
@@ -79,6 +91,10 @@ export async function checkLimits(userId: string): Promise<Denial | null> {
           and created_at > now() - ${`${RATE_WINDOW_SECONDS} seconds`}::interval
       )::int as recent
     from usage_event
+    where created_at >= least(
+      date_trunc('month', now()),
+      now() - ${`${RATE_WINDOW_SECONDS} seconds`}::interval
+    )
   `)
 
   const row = rows.rows[0]
