@@ -547,20 +547,34 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   // took effect. A loop reads the current refs on every pass.
   const runFrom = useCallback(
     async (gen: number) => {
-      for (;;) {
-        const page = pagesRef.current[indexRef.current]
-        if (!page) return
-        const state = await openPage(gen, page)
-        if (gen !== genRef.current) return
-        if (state) await runTurn(gen, page, state)
-        if (gen !== genRef.current) return
+      // Nothing in this loop is allowed to reject silently. It is driven by a
+      // `void begin()` from three call sites, so a throw anywhere inside it
+      // used to become an unhandled rejection: the lesson simply stopped, mid
+      // page, with the caption frozen on the last sentence and no indication
+      // that anything had failed. The canvas throwing from a disposed editor is
+      // what found this, but any throw here reads the same way to a learner.
+      try {
+        for (;;) {
+          const page = pagesRef.current[indexRef.current]
+          if (!page) return
+          const state = await openPage(gen, page)
+          if (gen !== genRef.current) return
+          if (state) await runTurn(gen, page, state)
+          if (gen !== genRef.current) return
 
-        if (indexRef.current >= pagesRef.current.length - 1) {
-          setStatus("done")
-          setCaption("That's the lesson. Pick any page from the outline to revisit it.")
-          return
+          if (indexRef.current >= pagesRef.current.length - 1) {
+            setStatus("done")
+            setCaption("That's the lesson. Pick any page from the outline to revisit it.")
+            return
+          }
+          setIndex(indexRef.current + 1)
         }
-        setIndex(indexRef.current + 1)
+      } catch (err) {
+        if (gen !== genRef.current) return
+        setStatus("idle")
+        setError(
+          `The lesson stopped: ${err instanceof Error ? err.message : "something went wrong drawing it"}`,
+        )
       }
     },
     [openPage, runTurn, setIndex],
@@ -683,14 +697,26 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       setCode({})
       setSpoken([])
 
-      for (const saved of stored.saved) {
+      // Same reasoning as `runFrom`: a replay is driven by an unawaited call
+      // too, and a stored lesson that stops halfway with no error looks exactly
+      // like one that is still loading.
+      try {
+        for (const saved of stored.saved) {
+          if (gen !== genRef.current) return
+          const page = stored.pages[saved.idx]
+          if (!page) continue
+          setIndex(saved.idx)
+          const state = await openPage(gen, page, saved.board)
+          if (!state || gen !== genRef.current) return
+          await replayTurn(gen, page, state, saved.beats)
+        }
+      } catch (err) {
         if (gen !== genRef.current) return
-        const page = stored.pages[saved.idx]
-        if (!page) continue
-        setIndex(saved.idx)
-        const state = await openPage(gen, page, saved.board)
-        if (!state || gen !== genRef.current) return
-        await replayTurn(gen, page, state, saved.beats)
+        setStatus("idle")
+        setError(
+          `The replay stopped: ${err instanceof Error ? err.message : "something went wrong drawing it"}`,
+        )
+        return
       }
 
       if (gen !== genRef.current) return

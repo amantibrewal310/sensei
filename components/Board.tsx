@@ -298,6 +298,17 @@ export function Board({ api }: { api: Ref<CanvasApi> }) {
           return () => {
             cancelAnimationFrame(queued)
             observer.disconnect()
+            // The editor is disposed the moment this unmounts, and disposal
+            // detaches tldraw's text-measurement element from the DOM. Every
+            // geometry call after that — `getCurrentPageBounds` inside
+            // `fitAll`, any frame label — measures a detached node, gets zero
+            // client rects, and throws on `rects[rects.length - 1].top`.
+            //
+            // Holding the reference was how a dead editor kept being used:
+            // tldraw's unlicensed-production gate unmounts itself on a timer,
+            // and the first `fitAll` afterwards took the whole lesson down with
+            // it. Every method above already guards on null.
+            editorRef.current = null
           }
         }}
       />
