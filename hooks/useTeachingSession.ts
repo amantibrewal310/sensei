@@ -1,16 +1,17 @@
 "use client"
 
 import { useCallback, useRef, useState } from "react"
+import { z } from "zod"
 import { LineParser, parseAction } from "@/lib/ndjson"
-import { readSse } from "@/lib/sse"
+import { errorFrameMessage, readSse } from "@/lib/sse"
 import { Narrator } from "@/lib/narrator"
 import { reportClientError } from "@/lib/report"
 import type { CanvasApi } from "@/components/Board"
 import type { Block } from "@/lib/blocks"
-import type { Board } from "@/lib/board"
+import { BoardSchema, type Board } from "@/lib/board"
 import type { Snippet } from "@/lib/code"
 import { StoredLesson, type StoredBeat } from "@/lib/replay"
-import { TRANSCRIPT_WINDOW, type Page } from "@/lib/lesson"
+import { PageSchema, TRANSCRIPT_WINDOW, type Page } from "@/lib/lesson"
 import { layoutBoard, panelById, type Layout } from "@/lib/layout"
 import { renderPanel } from "@/lib/render"
 import type { TeacherAction } from "@/lib/types"
@@ -84,15 +85,35 @@ async function errorFrom(res: Response, fallback: string): Promise<string> {
   }
 }
 
-/** Reads the `{message}` payload `sseResponse` sends on its `error` frame. */
-function messageFromErrorFrame(data: string, fallback: string): string {
+/**
+ * POSTs JSON to a route, answering null for a network-level failure. Going
+ * offline used to reject inside a form handler and surface as an unhandled
+ * promise rejection rather than as anything the learner could see.
+ */
+async function postJson(
+  url: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<Response | null> {
   try {
-    const body = JSON.parse(data) as { message?: unknown }
-    return typeof body.message === "string" && body.message ? body.message : fallback
+    return await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    })
   } catch {
-    return fallback
+    return null
   }
 }
+
+const PlanResponse = z.object({ pages: z.array(PageSchema) })
+
+const LESSON_DONE = "That's the lesson. Pick any page from the outline to revisit it."
+
+// One shared empty list, so a page with no code yet does not hand the UI a new
+// array identity on every render.
+const NO_CODE: Snippet[] = []
 
 /**
  * One page's canvas: the board it was given, what has been drawn into each
@@ -171,14 +192,8 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
 
       setCaption(`Setting up “${page.title}”…`)
 
-      let res: Response
-      try {
-        res = await fetch("/api/board", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ topic: topicRef.current, page }),
-        })
-      } catch {
+      const res = await postJson("/api/board", { topic: topicRef.current, page })
+      if (!res) {
         // Offline, DNS, or a dropped connection. Unlike a superseded turn this
         // is a real failure, and the learner is owed an explanation.
         if (gen === genRef.current) {
@@ -193,22 +208,18 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
         return null
       }
 
-      let board: Board
-      try {
-        board = (await res.json()) as Board
-      } catch {
+      // Parsed, not cast — the rule the routes apply to model output, applied
+      // to what a proxy or crash upstream may have put in this body instead.
+      const board = BoardSchema.safeParse(await res.json().catch(() => null))
+      if (!board.success) {
         setError(`The board for “${page.title}” came back malformed.`)
-        return null
-      }
-      if (!board?.panels?.length) {
-        setError(`The board for “${page.title}” came back empty.`)
         return null
       }
 
       const state: PageState = {
-        board,
+        board: board.data,
         content: new Map(),
-        layout: layoutBoard(board),
+        layout: layoutBoard(board.data),
       }
       stateRef.current.set(page.id, state)
       canvas.current?.openPage(page.id, page.title, state.layout)
@@ -285,19 +296,13 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
 
       canvas.current?.focus(page.id, state.layout, panelId)
 
-      let res: Response
-      try {
-        res = await fetch("/api/draw-panel", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            title: panel.title,
-            note: panel.note,
-            what,
-            existing: state.content.get(panelId) ?? [],
-          }),
-        })
-      } catch {
+      const res = await postJson("/api/draw-panel", {
+        title: panel.title,
+        note: panel.note,
+        what,
+        existing: state.content.get(panelId) ?? [],
+      })
+      if (!res) {
         if (gen === genRef.current) setError("Lost the connection mid-drawing.")
         return drawn
       }
@@ -332,7 +337,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
         // it before, so a stream that died halfway left a half-drawn panel and
         // no explanation.
         else if (event === "error") {
-          setError(messageFromErrorFrame(data, "The drawing stream failed."))
+          setError(errorFrameMessage(data, "The drawing stream failed."))
           return drawn
         }
       }
@@ -366,6 +371,49 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   )
 
   /**
+   * Speaks one sentence: waits for the previous one to land, shows this one,
+   * and starts its audio deliberately NOT awaited — the drawing for a sentence
+   * should happen while it is being said, not after it. One function for live
+   * and replay, so the pacing rules cannot drift between them.
+   */
+  const speakBeat = useCallback(
+    async (gen: number, text: string) => {
+      await speakingRef.current
+      if (gen !== genRef.current) return
+
+      setCaption(text)
+      setSpoken((lines) => [...lines, text].slice(-TRANSCRIPT_WINDOW))
+      speakingRef.current = narrator.speak(text).then(() => {
+        // With audio blocked there is nothing to pace the lesson, so fall
+        // back to holding the caption long enough to read.
+        if (narrator.blocked) {
+          setSoundBlocked(true)
+          return wait(dwell(text))
+        }
+      })
+      await wait(LEAD_MS)
+    },
+    [narrator],
+  )
+
+  /**
+   * The end of a taught page, live or replayed. The last sentence is still in
+   * the air after its shapes have landed — don't step on it with the next
+   * page. Answers whether the turn was still current, so the live path knows
+   * whether saving is warranted.
+   */
+  const finishPage = useCallback(
+    async (gen: number, page: Page): Promise<boolean> => {
+      await speakingRef.current
+      if (gen !== genRef.current) return false
+      setTaught((t) => (t.includes(page.id) ? t : [...t, page.id]))
+      canvas.current?.fitAll()
+      return true
+    },
+    [canvas],
+  )
+
+  /**
    * Writes the page that just finished, so the lesson can be taught again for
    * nothing.
    *
@@ -384,25 +432,18 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
     beatsRef.current = []
     if (!beats.length) return
 
-    try {
-      const res = await fetch("/api/lessons", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          lessonId: lessonIdRef.current,
-          topic: topicRef.current,
-          pages: pagesRef.current,
-          idx: pagesRef.current.findIndex((p) => p.id === page.id),
-          board: state.board,
-          beats,
-        }),
-      })
-      if (!res.ok) return
-      const { lessonId } = (await res.json()) as { lessonId?: string }
-      if (lessonId) lessonIdRef.current = lessonId
-    } catch {
-      // Offline, or the row was rejected. Either way the lesson continues.
-    }
+    const res = await postJson("/api/lessons", {
+      lessonId: lessonIdRef.current,
+      topic: topicRef.current,
+      pages: pagesRef.current,
+      idx: pagesRef.current.findIndex((p) => p.id === page.id),
+      board: state.board,
+      beats,
+    })
+    // Offline, or the row was rejected. Either way the lesson continues.
+    if (!res?.ok) return
+    const { lessonId } = (await res.json().catch(() => ({}))) as { lessonId?: string }
+    if (lessonId) lessonIdRef.current = lessonId
   }, [])
 
   const runTurn = useCallback(
@@ -452,30 +493,14 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       // Beats must land in order — a sentence, then the thing it describes.
       // Actions arrive while the teacher is still talking, so they are chained
       // rather than fired off in parallel.
-      let chain: Promise<void> = Promise.resolve()
+      let chain = Promise.resolve()
 
       const handle = async (a: TeacherAction) => {
         if (gen !== genRef.current) return
         if (a.type === "speak") {
           beatsRef.current.push({ kind: "speak", text: a.text })
           remember(transcriptRef.current, { role: "assistant", text: a.text })
-          // Let the previous sentence land before starting this one.
-          await speakingRef.current
-          if (gen !== genRef.current) return
-
-          setCaption(a.text)
-          setSpoken((lines) => [...lines, a.text].slice(-TRANSCRIPT_WINDOW))
-          // Deliberately NOT awaited: the drawing for this sentence should
-          // happen while it is being said, not after it.
-          speakingRef.current = narrator.speak(a.text).then(() => {
-            // With audio blocked there is nothing to pace the lesson, so fall
-            // back to holding the caption long enough to read.
-            if (narrator.blocked) {
-              setSoundBlocked(true)
-              return wait(dwell(a.text))
-            }
-          })
-          await wait(LEAD_MS)
+          await speakBeat(gen, a.text)
         } else if (a.type === "code") {
           beatsRef.current.push({ kind: "code", label: a.label, lines: a.lines })
           await showCode(gen, page, a.label, a.lines)
@@ -512,7 +537,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
             const { delta } = JSON.parse(data)
             for (const a of parser.push(delta)) enqueue(a)
           } else if (event === "error") {
-            setError(messageFromErrorFrame(data, "The lesson stream failed."))
+            setError(errorFrameMessage(data, "The lesson stream failed."))
             return
           }
         }
@@ -522,16 +547,9 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       }
       for (const a of parser.flush()) enqueue(a)
       await chain
-      // The last sentence is still in the air after its shapes have landed.
-      // Don't step on it with the next page.
-      await speakingRef.current
-      if (gen !== genRef.current) return
-
-      setTaught((t) => (t.includes(page.id) ? t : [...t, page.id]))
-      canvas.current?.fitAll()
-      await savePage(page, state)
+      if (await finishPage(gen, page)) await savePage(page, state)
     },
-    [canvas, drawPanel, narrator, savePage, showCode],
+    [canvas, drawPanel, finishPage, narrator, savePage, showCode, speakBeat],
   )
 
   // The index the async loop reads and the index the UI renders are the same
@@ -540,6 +558,40 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   const setIndex = useCallback((index: number) => {
     indexRef.current = index
     setCurrentIndex(index)
+  }, [])
+
+  /** Everything starting a lesson resets — one list, so live and replay cannot drift. */
+  const resetLesson = useCallback(
+    (topic: string, pages: Page[], replaying: boolean) => {
+      topicRef.current = topic
+      pagesRef.current = pages
+      stateRef.current.clear()
+      transcriptRef.current = []
+      // A fresh lesson is a fresh row; a replay reads rows and never writes one.
+      lessonIdRef.current = undefined
+      beatsRef.current = []
+      replayingRef.current = replaying
+      setPages(pages)
+      setIndex(0)
+      setTaught([])
+      setCode({})
+      setSpoken([])
+    },
+    [setIndex],
+  )
+
+  /**
+   * A throw that reaches one of the two run loops is a bug in this code, not a
+   * route saying no — those are all caught closer in and shown without
+   * reaching here. Which is exactly why it is reported: the expected failures
+   * are already in a server log somewhere, and this class was not.
+   */
+  const crashed = useCallback((where: string, what: string, err: unknown) => {
+    reportClientError(where, err)
+    setStatus("idle")
+    setError(
+      `${what} stopped: ${err instanceof Error ? err.message : "something went wrong drawing it"}`,
+    )
   }, [])
 
   // Iterating rather than recursing is deliberate. The old loop called itself
@@ -565,25 +617,17 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
 
           if (indexRef.current >= pagesRef.current.length - 1) {
             setStatus("done")
-            setCaption("That's the lesson. Pick any page from the outline to revisit it.")
+            setCaption(LESSON_DONE)
             return
           }
           setIndex(indexRef.current + 1)
         }
       } catch (err) {
         if (gen !== genRef.current) return
-        // A throw that reaches here is a bug in this code, not a route saying
-        // no — those are all caught closer in and shown without reaching this
-        // line. Which is exactly why it is reported: the expected failures are
-        // already in a server log somewhere, and this class was not.
-        reportClientError("teaching-loop", err)
-        setStatus("idle")
-        setError(
-          `The lesson stopped: ${err instanceof Error ? err.message : "something went wrong drawing it"}`,
-        )
+        crashed("teaching-loop", "The lesson", err)
       }
     },
-    [openPage, runTurn, setIndex],
+    [crashed, openPage, runTurn, setIndex],
   )
 
   /**
@@ -622,21 +666,19 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
     async (gen: number, page: Page, state: PageState, beats: StoredBeat[]) => {
       setStatus("teaching")
 
+      // The live path hides the ~1s synthesis cost by prefetching each line as
+      // it is parsed. Here the whole beat list is in hand before the first
+      // sentence, so start them all — replay used to pay that second as dead
+      // air at the top of every sentence, on the path that exists to be fast.
+      for (const beat of beats) {
+        if (beat.kind === "speak") narrator.prefetch(beat.text)
+      }
+
       for (const beat of beats) {
         if (gen !== genRef.current) return
 
         if (beat.kind === "speak") {
-          await speakingRef.current
-          if (gen !== genRef.current) return
-          setCaption(beat.text)
-          setSpoken((lines) => [...lines, beat.text].slice(-TRANSCRIPT_WINDOW))
-          speakingRef.current = narrator.speak(beat.text).then(() => {
-            if (narrator.blocked) {
-              setSoundBlocked(true)
-              return wait(dwell(beat.text))
-            }
-          })
-          await wait(LEAD_MS)
+          await speakBeat(gen, beat.text)
         } else if (beat.kind === "code") {
           await showCode(gen, page, beat.label, beat.lines)
         } else if (beat.kind === "panel") {
@@ -651,12 +693,9 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
         }
       }
 
-      await speakingRef.current
-      if (gen !== genRef.current) return
-      setTaught((t) => (t.includes(page.id) ? t : [...t, page.id]))
-      canvas.current?.fitAll()
+      await finishPage(gen, page)
     },
-    [applyBlock, canvas, narrator, showCode],
+    [applyBlock, canvas, finishPage, narrator, showCode, speakBeat],
   )
 
   /** Loads a stored lesson and plays it from the beginning. */
@@ -692,16 +731,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
 
       const gen = ++genRef.current
       abortRef.current?.abort()
-      replayingRef.current = true
-      topicRef.current = stored.topic
-      pagesRef.current = stored.pages
-      stateRef.current.clear()
-      transcriptRef.current = []
-      setPages(stored.pages)
-      setIndex(0)
-      setTaught([])
-      setCode({})
-      setSpoken([])
+      resetLesson(stored.topic, stored.pages, true)
 
       // Same reasoning as `runFrom`: a replay is driven by an unawaited call
       // too, and a stored lesson that stops halfway with no error looks exactly
@@ -718,21 +748,16 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
         }
       } catch (err) {
         if (gen !== genRef.current) return
-        // Same reasoning as runFrom's catch: anything landing here is a client
-        // bug, and a replay has no model call whose server log would show it.
-        reportClientError("replay", err)
-        setStatus("idle")
-        setError(
-          `The replay stopped: ${err instanceof Error ? err.message : "something went wrong drawing it"}`,
-        )
+        // A replay has no model call whose server log would show the failure.
+        crashed("replay", "The replay", err)
         return
       }
 
       if (gen !== genRef.current) return
       setStatus("done")
-      setCaption("That's the lesson. Pick any page from the outline to revisit it.")
+      setCaption(LESSON_DONE)
     },
-    [openPage, replayTurn, setIndex],
+    [crashed, openPage, replayTurn, resetLesson, setIndex],
   )
 
   const start = useCallback(
@@ -740,60 +765,35 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       setStatus("planning")
       setCaption("Planning the lesson…")
       setError(null)
-      topicRef.current = topic
 
-      // This fetch used to be unwrapped, so going offline rejected inside a
-      // form handler and surfaced as an unhandled promise rejection rather than
-      // as anything the learner could see.
-      let res: Response
-      try {
-        res = await fetch("/api/plan", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ topic }),
-        })
-      } catch {
+      const res = await postJson("/api/plan", { topic })
+      if (!res) {
         setStatus("idle")
         setError("Couldn't reach the server. Check your connection.")
         return
       }
-
       if (!res.ok) {
         setStatus("idle")
         setError(await errorFrom(res, "Couldn't plan that lesson."))
         return
       }
 
-      let planned: Page[] | undefined
-      try {
-        ;({ pages: planned } = (await res.json()) as { pages: Page[] })
-      } catch {
+      const planned = PlanResponse.safeParse(await res.json().catch(() => null))
+      if (!planned.success) {
         setStatus("idle")
         setError("The lesson plan came back malformed.")
         return
       }
-      if (!planned?.length) {
+      if (!planned.data.pages.length) {
         setStatus("idle")
         setCaption("Couldn't plan that lesson. Try another topic.")
         return
       }
 
-      pagesRef.current = planned
-      stateRef.current.clear()
-      transcriptRef.current = []
-      // A fresh lesson is a fresh row, and it is being taught rather than read.
-      lessonIdRef.current = undefined
-      beatsRef.current = []
-      replayingRef.current = false
-      setPages(planned)
-      setIndex(0)
-      setTaught([])
-      setCode({})
-      setSpoken([])
-
+      resetLesson(topic, planned.data.pages, false)
       await begin()
     },
-    [begin, setIndex],
+    [begin, resetLesson],
   )
 
   /**
@@ -850,6 +850,6 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
     error,
     soundBlocked,
     enableSound,
-    code: code[pages[currentIndex]?.id ?? ""] ?? [],
+    code: code[pages[currentIndex]?.id ?? ""] ?? NO_CODE,
   }
 }

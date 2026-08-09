@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { anthropic } from "@/lib/anthropic"
+import { cachedSystem, streamModel } from "@/lib/claude"
 import { sseResponse } from "@/lib/sse"
 import { TEACHER_MODEL } from "@/lib/models"
 import { TEACHER_SYSTEM } from "@/lib/prompts"
@@ -7,7 +7,6 @@ import { BoardSchema, describeBoard } from "@/lib/board"
 import { MAX_TRANSCRIPT, PAGE_KIND, PageSchema, Topic } from "@/lib/lesson"
 import { readBody } from "@/lib/request"
 import { withGuard } from "@/lib/guard"
-import { foldUsage, recordModelUsage, type TokenUsage } from "@/lib/usage"
 
 export const runtime = "nodejs"
 // Vercel Hobby: 10s default, 60s ceiling — and the ceiling covers the whole
@@ -17,8 +16,6 @@ export const runtime = "nodejs"
 // (docs/setup.md §5), both of which flag at 45s.
 export const maxDuration = 60
 
-// Named once: withGuard puts it in the log line, recordUsage puts it in
-// `usage_event.route`, and the spend cap reads that column.
 const ROUTE = "teach"
 
 const TeachRequest = z
@@ -82,79 +79,31 @@ export const POST = withGuard(ROUTE, async (req, user) => {
     },
   ]
 
-  async function* gen() {
-    const started = Date.now()
-    const stream = anthropic.messages.stream(
-      {
+  return sseResponse(
+    streamModel({
+      route: ROUTE,
+      userId: user.id,
+      params: {
         model: TEACHER_MODEL,
         // Thinking and response text share this budget on this model, and
         // 4000 — sized for the text alone — left a thoughtful turn ending at
         // the cap, which on the wire looks exactly like a finished page. Same
-        // headroom as /api/plan; the stop_reason check below is what makes
+        // headroom as /api/plan; streamModel's stop_reason check is what makes
         // running out visible instead of silent.
         max_tokens: 8000,
         thinking: { type: "adaptive" },
         output_config: { effort: "high" },
-        system: [
-          {
-            type: "text",
-            text: TEACHER_SYSTEM,
-            cache_control: { type: "ephemeral" },
-          },
-        ],
+        system: cachedSystem(TEACHER_SYSTEM),
         messages,
       },
       // The learner interrupting is routine — asking a question aborts this
       // request — and without the signal the model kept generating a turn
       // nobody would read, billed in full. /api/speak has always done this.
-      { signal: req.signal },
-    )
-
-    // Usage is folded in as it streams and recorded in a finally, because
-    // `finalMessage()` only exists for a turn that finished: an interrupted
-    // one used to skip the recording entirely, and a call that lands no row
-    // in usage_event is free as far as every cap is concerned.
-    const usage: TokenUsage = { input_tokens: 0, output_tokens: 0 }
-    let stop: string | null = null
-    try {
-      for await (const ev of stream) {
-        foldUsage(usage, ev)
-        if (ev.type === "message_delta") stop = ev.delta.stop_reason ?? stop
-        if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
-          yield { event: "text", data: { delta: ev.delta.text } }
-        }
-      }
-    } finally {
-      await recordModelUsage({
-        route: ROUTE,
-        userId: user.id,
-        model: TEACHER_MODEL,
-        usage,
-        ms: Date.now() - started,
-      })
-    }
-
-    // A turn that ran out of room or was declined ended *cleanly* on the wire,
-    // so without these frames the client marked the page taught and saved a
-    // partial beat list — the exact path "never mark a page taught on a path
-    // that did not teach it" forbids. The client already renders error frames;
-    // nothing over there had to change.
-    if (stop === "max_tokens") {
-      yield {
-        event: "error",
-        data: {
-          message: "The teacher ran out of room on this page. Ask again to re-teach it.",
-        },
-      }
-      return
-    }
-    if (stop === "refusal") {
-      yield { event: "error", data: { message: "This page was declined." } }
-      return
-    }
-
-    yield { event: "end", data: {} }
-  }
-
-  return sseResponse(gen())
+      signal: req.signal,
+      onText: (delta) => [{ event: "text", data: { delta } }],
+      truncated: "The teacher ran out of room on this page. Ask again to re-teach it.",
+      declined: "This page was declined.",
+      done: "end",
+    }),
+  )
 })

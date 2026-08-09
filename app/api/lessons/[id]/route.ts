@@ -22,18 +22,21 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 
   const { id } = await ctx.params
 
-  const [lesson] = await db.select().from(lessons).where(eq(lessons.id, id))
+  // The pages do not depend on how the ownership check answers, so both
+  // selects run at once and the rows are simply discarded on a 404.
+  const [[lesson], rows] = await Promise.all([
+    db.select().from(lessons).where(eq(lessons.id, id)),
+    db
+      .select()
+      .from(lessonPages)
+      .where(eq(lessonPages.lessonId, id))
+      .orderBy(asc(lessonPages.idx)),
+  ])
   // Not found and not yours are the same answer on purpose: a different status
   // for the second would confirm the id exists to somebody who should not know.
   if (!lesson || (lesson.userId !== gate.user.id && gate.user.role !== "admin")) {
     return NextResponse.json({ error: "no such lesson" }, { status: 404 })
   }
-
-  const rows = await db
-    .select()
-    .from(lessonPages)
-    .where(eq(lessonPages.lessonId, id))
-    .orderBy(asc(lessonPages.idx))
 
   const saved = []
   for (const row of rows) {

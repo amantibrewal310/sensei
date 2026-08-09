@@ -11,8 +11,6 @@ export const runtime = "nodejs"
 // streamed straight through, so the ceiling covers playback start to finish.
 export const maxDuration = 60
 
-// Named once: withGuard puts it in the log line, recordUsage puts it in
-// `usage_event.route`, and the spend cap reads that column.
 const ROUTE = "speak"
 
 // One spoken sentence. The teacher is instructed to emit one or two at a time,

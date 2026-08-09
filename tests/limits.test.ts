@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { CLEAR_LIMITS as CLEAR } from "./fixtures"
 
 // One row, standing in for the single query checkLimits runs. The arithmetic
 // and the ordering are the real code.
@@ -11,8 +12,6 @@ vi.mock("@/lib/db", () => ({
 
 const { checkLimits, GLOBAL_CAP_MICROS, RATE_LIMIT, USER_CAP_MICROS } =
   await import("@/lib/limits")
-
-const CLEAR = { user_micros: "0", global_micros: "0", recent: 0 }
 
 describe("checkLimits", () => {
   beforeEach(() => {

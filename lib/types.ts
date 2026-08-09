@@ -1,4 +1,4 @@
-export type DrawAction =
+type DrawAction =
   { type: "draw"; panel: string; what: string } | { type: "draw"; connector: string }
 
 export type TeacherAction =

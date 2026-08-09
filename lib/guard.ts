@@ -17,12 +17,30 @@ export interface Learner {
   role: "user" | "admin"
 }
 
-export type Gate = { ok: true; user: Learner } | { ok: false; response: NextResponse }
+type Gate = { ok: true; user: Learner } | { ok: false; response: NextResponse }
 
 /** The reason, in words a learner can act on rather than a status code. */
 const DENIED: Record<"pending" | "rejected", string> = {
   pending: "Your account is waiting for approval. Reload once it has been granted.",
   rejected: "Your account was not approved for this app.",
+}
+
+/** The 401, built per request — a Response body reads once — so both gates refuse in the same words. */
+const signInFirst = (): Gate => ({
+  ok: false,
+  response: NextResponse.json({ error: "Sign in to continue." }, { status: 401 }),
+})
+
+/**
+ * Identity without approval — for /api/client-error, whose reports are wanted
+ * exactly when the approval and budget gates would say no. The session
+ * requirement is what keeps that route from being an anonymous log-injection
+ * endpoint.
+ */
+export async function requireSignedIn(): Promise<Gate> {
+  const user = (await auth())?.user
+  if (!user?.id || !user.email) return signInFirst()
+  return { ok: true, user: { id: user.id, email: user.email, role: user.role } }
 }
 
 /**
@@ -37,12 +55,7 @@ export async function requireApproved(): Promise<Gate> {
   const session = await auth()
   const user = session?.user
 
-  if (!user?.id || !user.email) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Sign in to continue." }, { status: 401 }),
-    }
-  }
+  if (!user?.id || !user.email) return signInFirst()
 
   if (user.status !== "approved") {
     return {

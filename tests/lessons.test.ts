@@ -1,11 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { APPROVED, BOARD, CLEAR_LIMITS, PAGE, post } from "./fixtures"
 
-const APPROVED = {
-  id: "u_owner",
-  email: "owner@example.com",
-  status: "approved",
-  role: "user",
-}
 let currentUser: Record<string, unknown> | null = APPROVED
 vi.mock("@/lib/auth", () => ({
   auth: async () => (currentUser ? { user: currentUser } : null),
@@ -13,7 +8,7 @@ vi.mock("@/lib/auth", () => ({
 
 // The limit query, present only so that a route wired to withGuard by mistake
 // would still run — and then be caught by the test that says it must not be.
-let limitRow = { user_micros: "0", global_micros: "0", recent: 0 }
+let limitRow = { ...CLEAR_LIMITS }
 
 // A tiny stand-in for the two tables, enough to tell an insert from an update
 // and to answer a select.
@@ -34,7 +29,7 @@ vi.mock("@/lib/db", () => {
   return {
     db: {
       execute: async () => ({ rows: [limitRow] }),
-      select: (shape?: unknown) => chain(() => (shape ? lessonRows : lessonRows)),
+      select: () => chain(() => lessonRows),
       insert: (table: { _name?: string }) => ({
         values: (row: Record<string, unknown>) => {
           const target = table._name === "lesson" ? lessonRows : pageRows
@@ -59,51 +54,20 @@ vi.mock("@/lib/db", () => {
 
 const { POST: saveLesson, GET: listLessons } = await import("@/app/api/lessons/route")
 
-const PAGE = {
-  id: "page-1",
-  title: "Token bucket",
-  summary: "permits that refill",
-  question: "how does it admit requests?",
-  kind: "algorithm" as const,
-}
-
 const BODY = {
   topic: "rate limiting",
   pages: [PAGE],
   idx: 0,
-  board: {
-    panels: [
-      {
-        id: "bucket",
-        title: "The bucket",
-        col: 0,
-        row: 0,
-        colSpan: 1,
-        rowSpan: 1,
-        note: "",
-      },
-    ],
-    connectors: [],
-  },
+  board: BOARD,
   beats: [
     { kind: "speak", text: "A token bucket holds permits." },
     { kind: "panel", panel: "bucket", blocks: [{ kind: "note", text: "refills" }] },
   ],
 }
 
-function post(body: unknown) {
-  return saveLesson(
-    new Request("http://localhost/api/lessons", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  )
-}
-
 beforeEach(() => {
   currentUser = APPROVED
-  limitRow = { user_micros: "0", global_micros: "0", recent: 0 }
+  limitRow = { ...CLEAR_LIMITS }
   lessonRows = []
   pageRows = []
   calls.length = 0
@@ -111,7 +75,7 @@ beforeEach(() => {
 
 describe("saving a lesson", () => {
   it("creates the lesson on the first page and returns its id", async () => {
-    const res = await post(BODY)
+    const res = await post(saveLesson, BODY)
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ lessonId: expect.any(String) })
     expect(calls).toContain("insert:lesson")
@@ -121,13 +85,16 @@ describe("saving a lesson", () => {
   it("rejects beats that are not beats", async () => {
     // These land in jsonb and are read back later to drive the renderer. A
     // column that accepts anything is exactly why the shape is checked here.
-    const res = await post({ ...BODY, beats: [{ kind: "sudo", cmd: "rm -rf" }] })
+    const res = await post(saveLesson, {
+      ...BODY,
+      beats: [{ kind: "sudo", cmd: "rm -rf" }],
+    })
     expect(res.status).toBe(400)
     expect(calls).toHaveLength(0)
   })
 
   it("rejects a block shape the renderer could not draw", async () => {
-    const res = await post({
+    const res = await post(saveLesson, {
       ...BODY,
       beats: [
         { kind: "panel", panel: "bucket", blocks: [{ kind: "sql", text: "drop" }] },
@@ -139,13 +106,13 @@ describe("saving a lesson", () => {
 
   it("refuses a caller who is not signed in", async () => {
     currentUser = null
-    expect((await post(BODY)).status).toBe(401)
+    expect((await post(saveLesson, BODY)).status).toBe(401)
     expect(calls).toHaveLength(0)
   })
 
   it("refuses a caller still waiting for approval", async () => {
     currentUser = { ...APPROVED, status: "pending" }
-    expect((await post(BODY)).status).toBe(403)
+    expect((await post(saveLesson, BODY)).status).toBe(403)
     expect(calls).toHaveLength(0)
   })
 
@@ -154,7 +121,7 @@ describe("saving a lesson", () => {
     // that spends nothing would break the replay at exactly the moment the live
     // path already has — which is when you need the replay.
     limitRow = { user_micros: "999000000", global_micros: "999000000", recent: 9999 }
-    expect((await post(BODY)).status).toBe(200)
+    expect((await post(saveLesson, BODY)).status).toBe(200)
 
     const list = await listLessons()
     expect(list.status).toBe(200)

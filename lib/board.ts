@@ -16,7 +16,7 @@ import { z } from "zod"
 const Slot = z.number().int().min(0).max(64)
 const Span = z.number().int().min(1).max(64)
 
-export const PanelSchema = z.object({
+const PanelSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   col: Slot,
@@ -27,7 +27,7 @@ export const PanelSchema = z.object({
   note: z.string().default(""),
 })
 
-export const ConnectorSchema = z.object({
+const ConnectorSchema = z.object({
   id: z.string().min(1),
   from: z.string().min(1),
   to: z.string().min(1),
@@ -46,9 +46,6 @@ export type Panel = z.infer<typeof PanelSchema>
 export type Connector = z.infer<typeof ConnectorSchema>
 export type Board = z.infer<typeof BoardSchema>
 
-// Small on purpose. A page covers one topic, so it needs two or three panels —
-// the old 4x3 grid was sized for a whole lesson on a single canvas, which is
-// exactly the clutter that pages exist to remove.
 /**
  * The board's inventory as the teacher prompt lists it — ids, titles, notes.
  *
@@ -69,6 +66,9 @@ export function describeBoard(board: Board): {
   }
 }
 
+// Small on purpose. A page covers one topic, so it needs two or three panels —
+// the old 4x3 grid was sized for a whole lesson on a single canvas, which is
+// exactly the clutter that pages exist to remove.
 export const GRID = { cols: 3, rows: 2 }
 
 export const BoardJsonSchema = {

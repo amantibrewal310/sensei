@@ -6,10 +6,27 @@
 // server log; these two were not, and the tldraw disposal crash shipped
 // through exactly that blindness.
 
-/** Truncated to the route's own zod bounds, so a long stack cannot turn a report into a 400. */
+import { z } from "zod"
+
+/** Truncated to the schema's own bounds, defined side by side below, so a long
+ * stack cannot turn a report into a 400. */
 const MESSAGE_MAX = 2000
 const STACK_MAX = 8000
 const DIGEST_MAX = 128
+
+/**
+ * What /api/client-error accepts. It lives here, beside the truncation that
+ * targets it, so tightening the route's bounds cannot silently turn every
+ * report into a 400 — the exact failure the truncation exists to prevent.
+ */
+export const Report = z.object({
+  /** Which seam caught it — "render", "teaching-loop", "replay". */
+  where: z.string().min(1).max(64),
+  message: z.string().min(1).max(MESSAGE_MAX),
+  stack: z.string().max(STACK_MAX).optional(),
+  /** Next.js's handle on a minified server-side stack, when the render path has one. */
+  digest: z.string().max(DIGEST_MAX).optional(),
+})
 
 export function reportClientError(where: string, error: unknown, digest?: string): void {
   const message =

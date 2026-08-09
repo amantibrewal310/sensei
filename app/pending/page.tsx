@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
-import { auth, signOut } from "@/lib/auth"
+import { auth } from "@/lib/auth"
 import { PollForApproval } from "@/components/PollForApproval"
+import { SignOutButton } from "@/components/SignOutButton"
 
 export const metadata = { title: "Waiting for approval — sensei" }
 
@@ -37,16 +38,7 @@ export default async function Pending() {
 
       <p className="text-sm text-neutral-500">Signed in as {session.user.email}</p>
 
-      <form
-        action={async () => {
-          "use server"
-          await signOut({ redirectTo: "/login" })
-        }}
-      >
-        <button className="rounded border border-neutral-300 px-4 py-2 text-sm hover:bg-neutral-50">
-          Sign out
-        </button>
-      </form>
+      <SignOutButton className="rounded border border-neutral-300 px-4 py-2 text-sm hover:bg-neutral-50" />
     </main>
   )
 }

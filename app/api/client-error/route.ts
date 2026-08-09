@@ -1,6 +1,5 @@
-import { NextResponse } from "next/server"
-import { z } from "zod"
-import { auth } from "@/lib/auth"
+import { requireSignedIn } from "@/lib/guard"
+import { Report } from "@/lib/report"
 import { readBody } from "@/lib/request"
 
 export const runtime = "nodejs"
@@ -21,20 +20,9 @@ export const runtime = "nodejs"
 // signed-in flood to log lines. Its exemption from the guard table is recorded
 // in tests/routes.test.ts.
 
-const Report = z.object({
-  /** Which seam caught it — "render", "teaching-loop", "replay". */
-  where: z.string().min(1).max(64),
-  message: z.string().min(1).max(2000),
-  stack: z.string().max(8000).optional(),
-  /** Next.js's handle on a minified server-side stack, when the render path has one. */
-  digest: z.string().max(128).optional(),
-})
-
 export async function POST(req: Request): Promise<Response> {
-  const user = (await auth())?.user
-  if (!user?.id) {
-    return NextResponse.json({ error: "Sign in to continue." }, { status: 401 })
-  }
+  const gate = await requireSignedIn()
+  if (!gate.ok) return gate.response
 
   const body = await readBody(req, Report)
   if (!body.ok) return body.response
@@ -42,7 +30,7 @@ export async function POST(req: Request): Promise<Response> {
   console.log(
     JSON.stringify({
       at: "client-error",
-      user: user.id,
+      user: gate.user.id,
       where: body.data.where,
       message: body.data.message,
       digest: body.data.digest,

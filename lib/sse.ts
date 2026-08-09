@@ -6,7 +6,7 @@
 // those two numbers were a spec re-encoded as character counts at every call
 // site — and there were two call sites, both copies of each other.
 
-interface Frame {
+export interface Frame {
   event: string
   data: unknown
 }
@@ -106,5 +106,15 @@ export async function* readSse(
     // The stream died. The caller's turn is over; there is nothing to salvage.
   } finally {
     await reader.cancel().catch(() => {})
+  }
+}
+
+/** Reads the `{message}` payload `sseResponse` sends on its `error` frame. */
+export function errorFrameMessage(data: string, fallback: string): string {
+  try {
+    const body = JSON.parse(data) as { message?: unknown }
+    return typeof body.message === "string" && body.message ? body.message : fallback
+  } catch {
+    return fallback
   }
 }

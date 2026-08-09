@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { useTeachingSession } from "@/hooks/useTeachingSession"
 import type { CanvasApi } from "@/components/Board"
+import { BOARD } from "./fixtures"
 
 // The generation counter is the subtlest thing in this app and the only part of
 // it with a bug in the history: two turns ran concurrently and the lesson
@@ -27,21 +28,6 @@ const PLAN = {
       kind: "algorithm",
     },
   ],
-}
-
-const BOARD = {
-  panels: [
-    {
-      id: "bucket",
-      title: "The bucket",
-      col: 0,
-      row: 0,
-      colSpan: 1,
-      rowSpan: 1,
-      note: "",
-    },
-  ],
-  connectors: [],
 }
 
 const BLOCK = '{"kind":"note","text":"a token","color":"black"}'

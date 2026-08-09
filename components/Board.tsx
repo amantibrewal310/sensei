@@ -9,6 +9,7 @@ import {
   type Editor,
   type TLFrameShape,
   type TLPageId,
+  type TLShape,
   type TLShapeId,
 } from "tldraw"
 import "tldraw/tldraw.css"
@@ -198,7 +199,7 @@ export function Board({ api }: { api: Ref<CanvasApi> }) {
             // belt to the braces — but recreating beats leaving a stale shape.
             editor.deleteShapes([id])
             editor.createShape(next)
-          } else {
+          } else if (moved(existing, next)) {
             editor.updateShape(next)
           }
         }
@@ -323,6 +324,29 @@ export function Board({ api }: { api: Ref<CanvasApi> }) {
       />
     </div>
   )
+}
+
+/**
+ * Whether re-submitting `next` would change what is on the canvas.
+ *
+ * Appending block n re-places every shape before it, and most of them have not
+ * moved — but tldraw compares props by reference, so an identical re-submit
+ * still dirties the record and re-renders it (the same reason ensureFrame
+ * guards its update). Only position and size can differ at a given index: a
+ * block, once appended, never changes its text or colour, only where the
+ * reflow puts it.
+ */
+function moved(existing: TLShape, next: ReturnType<typeof toTldraw>): boolean {
+  if (existing.x !== next.x || existing.y !== next.y) return true
+  const props = existing.props as Record<string, unknown>
+  if (next.type === "geo") {
+    return props.w !== next.props.w || props.h !== next.props.h
+  }
+  if (next.type === "arrow") {
+    const end = props.end as { x: number; y: number } | undefined
+    return end?.x !== next.props.end.x || end?.y !== next.props.end.y
+  }
+  return false
 }
 
 /** One rendered shape as tldraw wants it. Coordinates are already panel-local. */

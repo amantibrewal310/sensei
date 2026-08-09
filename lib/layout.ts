@@ -197,7 +197,7 @@ function extentOf(tracks: number[], start: number, span: number): number {
 }
 
 /** Do two panels' cell blocks share an edge (or a corner)? */
-export function adjacent(a: Panel, b: Panel): boolean {
+function adjacent(a: Panel, b: Panel): boolean {
   const gap = (aStart: number, aSpan: number, bStart: number, bSpan: number) =>
     Math.max(aStart - (bStart + bSpan), bStart - (aStart + aSpan))
 

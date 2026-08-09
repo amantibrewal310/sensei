@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MAX_TRANSCRIPT } from "@/lib/lesson"
 import { GLOBAL_CAP_MICROS, RATE_LIMIT, USER_CAP_MICROS } from "@/lib/limits"
 import { TTS_MICROS_PER_CHAR } from "@/lib/models"
+import { APPROVED, BOARD, CLEAR_LIMITS, PAGE, post } from "./fixtures"
 
 // The SDK is the only thing stubbed. Everything else — zod validation, the
 // prompt assembly, the NDJSON parser, the SSE writer — is the real code, which
@@ -18,12 +19,6 @@ vi.mock("@/lib/anthropic", () => ({
 // shape, so the day the session stops carrying `status` they go red here rather
 // than opening the routes to everyone in silence. What the guard does when the
 // answer is no is tests/guard.test.ts.
-const APPROVED = {
-  id: "u_test",
-  email: "learner@example.com",
-  status: "approved",
-  role: "user",
-}
 let currentUser: Record<string, unknown> | null = APPROVED
 vi.mock("@/lib/auth", () => ({
   auth: async () => (currentUser ? { user: currentUser } : null),
@@ -32,7 +27,7 @@ vi.mock("@/lib/auth", () => ({
 // The database, and only the database. `lib/limits` and `lib/usage` stay real,
 // so these tests exercise the actual cap arithmetic and the actual insert —
 // what is faked is the one thing that would otherwise need a network.
-let limitRow = { user_micros: "0", global_micros: "0", recent: 0 }
+let limitRow = { ...CLEAR_LIMITS }
 const inserted: Record<string, unknown>[] = []
 vi.mock("@/lib/db", () => ({
   db: {
@@ -98,48 +93,12 @@ function streams(text: string, stop_reason = "end_turn") {
   })
 }
 
-function post(
-  route: (req: Request) => Promise<Response>,
-  body: unknown,
-): Promise<Response> {
-  return route(
-    new Request("http://localhost/api", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  )
-}
-
 /** Every frame a streaming route wrote, in order. */
 async function frames(res: Response): Promise<{ event: string; data: string }[]> {
   const { readSse } = await import("@/lib/sse")
   const out = []
   for await (const frame of readSse(res.body!)) out.push(frame)
   return out
-}
-
-const PAGE = {
-  id: "page-1",
-  title: "Token bucket",
-  summary: "permits that refill",
-  question: "how does it admit requests?",
-  kind: "algorithm" as const,
-}
-
-const BOARD = {
-  panels: [
-    {
-      id: "bucket",
-      title: "The bucket",
-      col: 0,
-      row: 0,
-      colSpan: 1,
-      rowSpan: 1,
-      note: "",
-    },
-  ],
-  connectors: [],
 }
 
 const A_PLAN = JSON.stringify({
@@ -162,7 +121,7 @@ const A_PLAN = JSON.stringify({
 beforeEach(() => {
   vi.clearAllMocks()
   currentUser = APPROVED
-  limitRow = { user_micros: "0", global_micros: "0", recent: 0 }
+  limitRow = { ...CLEAR_LIMITS }
   inserted.length = 0
   // logUsage writes a line per call, which is wanted in production and noise here.
   vi.spyOn(console, "log").mockImplementation(() => {})

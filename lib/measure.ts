@@ -16,8 +16,8 @@
 export const CHAR_W = 13.5
 export const LINE_H = 26
 /** Breathing room inside a labelled shape, per side. Must exceed tldraw's 16. */
-export const PAD_X = 18
-export const PAD_Y = 10
+const PAD_X = 18
+const PAD_Y = 10
 
 /** Labels are 1-4 words. This is the backstop for a model that ignores that. */
 export const MAX_LABEL = 44

@@ -66,6 +66,7 @@ export async function Spend() {
   // over the wire; a monthly total in micros is nowhere near the safe-integer
   // ceiling, so Number() is lossless — same reasoning as lib/limits.ts.
   const globalMicros = perUser.reduce((total, row) => total + Number(row.micros), 0)
+  const globalPct = pct(globalMicros, GLOBAL_CAP_MICROS)
 
   return (
     <section className="mt-12">
@@ -80,16 +81,12 @@ export async function Spend() {
         <span>
           {formatDollars(globalMicros)} of {formatDollars(GLOBAL_CAP_MICROS)}
         </span>
-        <span className="text-neutral-500">
-          {pct(globalMicros, GLOBAL_CAP_MICROS).toFixed(0)}%
-        </span>
+        <span className="text-neutral-500">{globalPct.toFixed(0)}%</span>
       </div>
       <div className="mb-8 h-2 w-full rounded bg-neutral-100">
         <div
-          className={`h-2 rounded ${
-            pct(globalMicros, GLOBAL_CAP_MICROS) >= 80 ? "bg-amber-500" : "bg-neutral-900"
-          }`}
-          style={{ width: `${pct(globalMicros, GLOBAL_CAP_MICROS)}%` }}
+          className={`h-2 rounded ${globalPct >= 80 ? "bg-amber-500" : "bg-neutral-900"}`}
+          style={{ width: `${globalPct}%` }}
         />
       </div>
 

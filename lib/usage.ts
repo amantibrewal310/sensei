@@ -92,7 +92,7 @@ export function formatDollars(micros: number): string {
  * no logger, and inventing one before there is a second consumer would be
  * scaffolding rather than infrastructure.
  */
-export function logUsage(
+function logUsage(
   route: string,
   model: string,
   usage: TokenUsage,

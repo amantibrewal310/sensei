@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { ADMIN } from "./fixtures"
 
 // The action's job is to refuse before it writes, so the database is a spy: if
 // a refusal ever reaches it, `updates` is non-empty and the test says so.
@@ -26,13 +27,6 @@ vi.mock("drizzle-orm", () => ({ eq: (col: unknown, val: unknown) => ({ col, val 
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }))
 
 const { decide } = await import("@/app/admin/actions")
-
-const ADMIN = {
-  id: "u_admin",
-  email: "admin@example.com",
-  status: "approved",
-  role: "admin",
-}
 
 describe("decide", () => {
   beforeEach(() => {

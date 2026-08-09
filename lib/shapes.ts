@@ -22,7 +22,7 @@ export const COLORS = [
 ] as const
 
 export type Color = (typeof COLORS)[number]
-export type Fill = "none" | "semi" | "solid"
+type Fill = "none" | "semi" | "solid"
 
 // The vocabulary is exactly as wide as lib/render.ts is: a box, a bare label,
 // and an arrow. Ellipse, diamond and a mono font were carried over from when the

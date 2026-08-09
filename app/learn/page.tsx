@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useRef, useState } from "react"
+import { Suspense, memo, useEffect, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import { useSearchParams } from "next/navigation"
 import { CodePane } from "@/components/CodePane"
@@ -10,9 +10,13 @@ import { useTeachingSession } from "@/hooks/useTeachingSession"
 import type { CanvasApi } from "@/components/Board"
 
 // tldraw is a browser-only canvas; rendering it on the server just throws.
-const Board = dynamic(() => import("@/components/Board").then((m) => m.Board), {
-  ssr: false,
-})
+// memo because its one prop is a stable ref object: without it, every caption
+// change and 90ms code tick re-rendered tldraw's root along with the page.
+const Board = memo(
+  dynamic(() => import("@/components/Board").then((m) => m.Board), {
+    ssr: false,
+  }),
+)
 
 function LearnInner() {
   const params = useSearchParams()
@@ -24,7 +28,6 @@ function LearnInner() {
   const startedRef = useRef(false)
 
   const session = useTeachingSession(canvas)
-  const [ask, setAsk] = useState("")
 
   useEffect(() => {
     if (startedRef.current) return
@@ -126,32 +129,42 @@ function LearnInner() {
           )}
         </div>
 
-        <form
-          className="flex gap-2 border-t border-neutral-200 bg-white p-3"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (ask.trim()) {
-              session.ask(ask.trim())
-              setAsk("")
-            }
-          }}
-        >
-          {/* A placeholder is not a label: it disappears the moment anyone
-              types, and it is not what a screen reader announces the field by. */}
-          <label className="sr-only" htmlFor="ask">
-            Ask a question about this page
-          </label>
-          <input
-            id="ask"
-            className="flex-1 rounded border border-neutral-300 p-2"
-            placeholder="Ask a question…"
-            value={ask}
-            onChange={(e) => setAsk(e.target.value)}
-          />
-          <button className="rounded bg-neutral-900 px-4 text-white">Ask</button>
-        </form>
+        <AskForm onAsk={session.ask} />
       </div>
     </div>
+  )
+}
+
+// Its own component so the keystroke state is its own too: typing a question
+// used to re-render the whole page — outline, transcript, canvas — per key.
+function AskForm({ onAsk }: { onAsk: (text: string) => void }) {
+  const [ask, setAsk] = useState("")
+
+  return (
+    <form
+      className="flex gap-2 border-t border-neutral-200 bg-white p-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (ask.trim()) {
+          onAsk(ask.trim())
+          setAsk("")
+        }
+      }}
+    >
+      {/* A placeholder is not a label: it disappears the moment anyone
+          types, and it is not what a screen reader announces the field by. */}
+      <label className="sr-only" htmlFor="ask">
+        Ask a question about this page
+      </label>
+      <input
+        id="ask"
+        className="flex-1 rounded border border-neutral-300 p-2"
+        placeholder="Ask a question…"
+        value={ask}
+        onChange={(e) => setAsk(e.target.value)}
+      />
+      <button className="rounded bg-neutral-900 px-4 text-white">Ask</button>
+    </form>
   )
 }
 

@@ -28,8 +28,8 @@ const STACK_PAD = 14
 const STACK_GAP = 10
 const HEADING_H = LINE_H + 6
 
-export const BLOCK_GAP = 30
-export const PANEL_PAD = 22
+const BLOCK_GAP = 30
+const PANEL_PAD = 22
 export const MIN_PANEL_W = 260
 export const MAX_PANEL_W = 1040
 export const MIN_PANEL_H = 150
@@ -49,7 +49,7 @@ const COL_GAP = 32
  */
 const MAX_COL_W = Math.floor((MAX_PANEL_W - 2 * PANEL_PAD - COL_GAP) / 2)
 
-export interface Rendered {
+interface Rendered {
   shapes: PanelShape[]
   w: number
   h: number

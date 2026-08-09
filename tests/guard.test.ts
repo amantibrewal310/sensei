@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { ADMIN, APPROVED } from "./fixtures"
 
 // One mutable session, so a case is a single assignment. `auth` is the only
 // thing replaced; the guard under test is real.
@@ -13,13 +14,6 @@ let session: { user?: FakeUser } | null = null
 vi.mock("@/lib/auth", () => ({ auth: async () => session }))
 
 const { requireApproved, assertAdmin } = await import("@/lib/guard")
-
-const APPROVED: FakeUser = {
-  id: "u_1",
-  email: "learner@example.com",
-  status: "approved",
-  role: "user",
-}
 
 /** The refusal branch, unwrapped — status and the message the client displays. */
 async function refusal() {
@@ -42,8 +36,8 @@ describe("requireApproved", () => {
     expect(gate.ok).toBe(true)
     if (!gate.ok) return
     expect(gate.user).toEqual({
-      id: "u_1",
-      email: "learner@example.com",
+      id: APPROVED.id,
+      email: APPROVED.email,
       role: "user",
     })
   })
@@ -85,8 +79,6 @@ describe("requireApproved", () => {
 })
 
 describe("assertAdmin", () => {
-  const ADMIN = { ...APPROVED, id: "u_admin", role: "admin" }
-
   beforeEach(() => {
     session = null
   })

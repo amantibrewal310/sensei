@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
-import { count, desc, eq, sql } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { db, lessonPages, lessons } from "@/lib/db"
 import { requireApproved } from "@/lib/guard"
+import { listLessons } from "@/lib/lessons-db"
 import { readBody } from "@/lib/request"
 import { SaveLessonRequest } from "@/lib/replay"
 
@@ -21,26 +22,7 @@ export async function GET() {
   const gate = await requireApproved()
   if (!gate.ok) return gate.response
 
-  // A join and a group-by rather than a correlated subquery, and not for taste.
-  // Interpolating columns into a sql`` fragment renders them *unqualified* —
-  // `where "lesson_id" = "id"` — and inside a subquery over lesson_page,
-  // `"id"` binds to lesson_page's own id. Postgres accepts it and every count
-  // comes back 0. This shape has no name for Postgres to resolve wrongly.
-  const rows = await db
-    .select({
-      id: lessons.id,
-      topic: lessons.topic,
-      createdAt: lessons.createdAt,
-      pages: count(lessonPages.id),
-    })
-    .from(lessons)
-    .leftJoin(lessonPages, eq(lessonPages.lessonId, lessons.id))
-    .where(eq(lessons.userId, gate.user.id))
-    .groupBy(lessons.id, lessons.topic, lessons.createdAt)
-    .orderBy(desc(lessons.createdAt))
-    .limit(50)
-
-  return NextResponse.json({ lessons: rows })
+  return NextResponse.json({ lessons: await listLessons(gate.user.id, 50) })
 }
 
 /**
@@ -66,7 +48,7 @@ export async function POST(req: Request) {
     const [own] = await db
       .select({ id: lessons.id })
       .from(lessons)
-      .where(sql`${lessons.id} = ${id} and ${lessons.userId} = ${gate.user.id}`)
+      .where(and(eq(lessons.id, id), eq(lessons.userId, gate.user.id)))
     if (!own) return NextResponse.json({ error: "no such lesson" }, { status: 404 })
 
     // The outline can grow as the lesson is taught, so keep the longest version.
