@@ -51,6 +51,8 @@ const { POST: board } = await import("@/app/api/board/route")
 const { POST: teach } = await import("@/app/api/teach/route")
 const { POST: drawPanel } = await import("@/app/api/draw-panel/route")
 const { POST: speak } = await import("@/app/api/speak/route")
+const { GET: health } = await import("@/app/api/health/route")
+const { POST: clientError } = await import("@/app/api/client-error/route")
 
 const USAGE = {
   input_tokens: 100,
@@ -235,6 +237,72 @@ describe("the gate, on every route that spends money", () => {
       expect(stream).not.toHaveBeenCalled()
     })
   }
+})
+
+describe("/api/health — no guard, spends nothing", () => {
+  // Deliberately absent from the table above, and written down here so the
+  // exemption stays a decision rather than an accident. It exists for an
+  // uptime monitor, which has no session and must be able to ask "are you up"
+  // without being answered 401 — safe only because the route touches nothing:
+  // no model, no database, no body.
+  it("answers a signed-out monitor without touching anything", async () => {
+    currentUser = null
+    const res = await health()
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.ok).toBe(true)
+    expect(body.sha).toBeTruthy()
+    expect(create).not.toHaveBeenCalled()
+    expect(stream).not.toHaveBeenCalled()
+    expect(inserted).toHaveLength(0)
+  })
+})
+
+describe("/api/client-error — no guard, spends nothing", () => {
+  // Outside the table for a different reason: it requires a session but not
+  // approval or budget headroom, because the moments it exists for include
+  // exactly the ones where the guard says no — a learner over their cap whose
+  // lesson then breaks is a report worth having, not a 402.
+  const report = { where: "teaching-loop", message: "editor was disposed" }
+
+  it("refuses an anonymous caller", async () => {
+    // Identity is what keeps this from being an open log-injection endpoint.
+    currentUser = null
+    const res = await post(clientError, report)
+    expect(res.status).toBe(401)
+  })
+
+  it("lands the report in the server log, attributed to its reporter", async () => {
+    const log = vi.spyOn(console, "log")
+    const res = await post(clientError, report)
+    expect(res.status).toBe(204)
+
+    const line = log.mock.calls
+      .map(([l]) => String(l))
+      .find((l) => l.includes("client-error"))
+    expect(line).toBeDefined()
+    expect(JSON.parse(line!)).toMatchObject({
+      at: "client-error",
+      user: "u_test",
+      where: "teaching-loop",
+      message: "editor was disposed",
+    })
+    expect(inserted).toHaveLength(0)
+  })
+
+  it("still accepts a caller who is only pending", async () => {
+    // The gate is identity, not approval: a pending learner sitting on
+    // /pending can hit a render bug too, and that report is wanted.
+    currentUser = { ...APPROVED, status: "pending" }
+    const res = await post(clientError, report)
+    expect(res.status).toBe(204)
+  })
+
+  it("rejects an essay-sized report", async () => {
+    // The size caps are what bound a signed-in flood to log lines.
+    const res = await post(clientError, { ...report, message: "x".repeat(5000) })
+    expect(res.status).toBe(400)
+  })
 })
 
 describe("/api/plan", () => {

@@ -12,9 +12,9 @@ import { foldUsage, recordModelUsage, type TokenUsage } from "@/lib/usage"
 export const runtime = "nodejs"
 // Vercel Hobby: 10s default, 60s ceiling — and the ceiling covers the whole
 // stream, not just time-to-first-byte. This is the route most at risk of
-// exceeding it; the `ms` column in usage_event is the early warning, and
-// §2.1 of docs/plans/2026-08-09-architecture-improvement-plan.md is the plan
-// for actually watching it.
+// exceeding it; the `ms` column in usage_event is the early warning, watched
+// in two places: the admin page's p95 column and the drain's threshold alert
+// (docs/setup.md §5), both of which flag at 45s.
 export const maxDuration = 60
 
 // Named once: withGuard puts it in the log line, recordUsage puts it in

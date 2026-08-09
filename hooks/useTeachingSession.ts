@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react"
 import { LineParser, parseAction } from "@/lib/ndjson"
 import { readSse } from "@/lib/sse"
 import { Narrator } from "@/lib/narrator"
+import { reportClientError } from "@/lib/report"
 import type { CanvasApi } from "@/components/Board"
 import type { Block } from "@/lib/blocks"
 import type { Board } from "@/lib/board"
@@ -571,6 +572,11 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
         }
       } catch (err) {
         if (gen !== genRef.current) return
+        // A throw that reaches here is a bug in this code, not a route saying
+        // no — those are all caught closer in and shown without reaching this
+        // line. Which is exactly why it is reported: the expected failures are
+        // already in a server log somewhere, and this class was not.
+        reportClientError("teaching-loop", err)
         setStatus("idle")
         setError(
           `The lesson stopped: ${err instanceof Error ? err.message : "something went wrong drawing it"}`,
@@ -712,6 +718,9 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
         }
       } catch (err) {
         if (gen !== genRef.current) return
+        // Same reasoning as runFrom's catch: anything landing here is a client
+        // bug, and a replay has no model call whose server log would show it.
+        reportClientError("replay", err)
         setStatus("idle")
         setError(
           `The replay stopped: ${err instanceof Error ? err.message : "something went wrong drawing it"}`,

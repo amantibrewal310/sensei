@@ -158,6 +158,39 @@ has ever been on a laptop is not a production secret.
 > Getting it wrong is recoverable: the check runs on every sign-in, not only when the account is
 > created, so fixing the variable and signing in again promotes you.
 
+## 5. Watching it run — a log drain and two monitors
+
+No new env vars; the app's side of this is already done. Every event that matters is one
+structured JSON line on stdout, and on Vercel Hobby those lines evaporate within hours — so the
+work here is attaching consumers, not changing code.
+
+**a. Log drain.** Vercel's own log drains need a Pro team; on Hobby, install a marketplace logging
+integration instead — Axiom and Betterstack both have free tiers that fit this volume many times
+over. Either one ingests the JSON lines as-is.
+
+**b. Alerts.** Define exactly these, in the drain's alerting UI:
+
+| Alert on                                           | It means                                                                                                                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `{"at":"usage","ok":false}`                        | A paid model call missed the ledger — **every cap now under-counts**. The one line that must never be write-only.                                                                    |
+| `{"at":"limit"}` with `why` ~ "monthly API budget" | The global kill switch fired. Everyone is refused until the month turns.                                                                                                             |
+| `{"at":"usage"}` with `ms > 45000`                 | A route is drifting toward the 60s function ceiling, where a turn is killed mid-stream. The admin page's p95 column turns amber at the same number, so the page and the pager agree. |
+
+Worth a saved search rather than an alert: `{"at":"client-error"}` — a learner's browser broke
+mid-lesson and reported it (`lib/report.ts`); and `{"at":"boot"}`, whose `sha` says which deploy
+wrote the lines that follow it.
+
+**c. Uptime monitor.** Point any free monitor (UptimeRobot or similar) at:
+
+```
+https://<project>.vercel.app/api/health
+```
+
+It answers `{"ok":true,"sha":"…"}` with no session, no database, and no spend — deliberately
+outside the guard, so the monitor can never trip a rate limit or show up on the ledger. The `sha`
+is the same stamp the boot line carries: if the monitor goes red right after a deploy, you know
+which build to suspect.
+
 ---
 
 ## Check it

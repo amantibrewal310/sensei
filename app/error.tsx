@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useEffect } from "react"
+import { reportClientError } from "@/lib/report"
 
 // The last line of defence, and the reason it exists is `components/Board.tsx`:
 // it drives tldraw's store imperatively — creating pages, deriving shape ids,
@@ -22,6 +23,9 @@ export default function Error({
     // survives to production unnoticed. `digest` is the only handle on the
     // server-side stack once minified.
     console.error("[sensei] unhandled render error", error.digest, error)
+    // And a copy for the server log, because the console above is in a browser
+    // nobody operates — this is the line a person can actually be paged on.
+    reportClientError("render", error, error.digest)
   }, [error])
 
   return (

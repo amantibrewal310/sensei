@@ -109,7 +109,7 @@ function stubCanvas() {
 }
 
 /** Routes each fetch by path, so a test only names the ones it cares about. */
-let routes: Record<string, () => Response | Promise<Response>>
+let routes: Record<string, (init?: RequestInit) => Response | Promise<Response>>
 
 beforeEach(() => {
   routes = {
@@ -127,11 +127,15 @@ beforeEach(() => {
     // Narration is not what these tests are about, and a failure to synthesise
     // is already treated as silence — which keeps `Audio` out of jsdom's way.
     "/api/speak": () => new Response(null, { status: 502 }),
+    // Error reporting is fire-and-forget from the hook's catch blocks; a test
+    // that cares overrides this to capture the body, the rest must not fail
+    // with "unexpected fetch" merely because something crashed as arranged.
+    "/api/client-error": () => new Response(null, { status: 204 }),
   }
-  vi.stubGlobal("fetch", (url: string) => {
+  vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
     const route = routes[new URL(url, "http://localhost").pathname]
     if (!route) throw new Error(`unexpected fetch: ${url}`)
-    return Promise.resolve(route())
+    return Promise.resolve(route(init))
   })
 })
 
@@ -224,6 +228,36 @@ describe("useTeachingSession", () => {
     await waitFor(() => expect(result.current.error).toBe("upstream went away"))
     // Half a lesson is not a taught page, and the outline must not claim it is.
     expect(result.current.taught).not.toContain("page-1")
+  })
+
+  it("reports a client bug to the server before showing it", async () => {
+    // The catch in runFrom is where a bug in this code surfaces — the canvas
+    // throwing from a disposed editor was the last real one. It used to end at
+    // setError, in a browser nobody operates; now the same throw also lands in
+    // the server log, so both halves are asserted: the learner sees it, and
+    // the report leaves the machine.
+    const reports: string[] = []
+    routes["/api/client-error"] = (init) => {
+      reports.push(String(init?.body))
+      return new Response(null, { status: 204 })
+    }
+
+    const canvas = stubCanvas()
+    ;(canvas.current.openPage as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("editor was disposed")
+    })
+
+    const { result } = renderHook(() => useTeachingSession(canvas))
+    await act(() => result.current.start("rate limiting"))
+
+    await waitFor(() => expect(result.current.error).toContain("editor was disposed"))
+    expect(result.current.status).toBe("idle")
+
+    await waitFor(() => expect(reports).toHaveLength(1))
+    expect(JSON.parse(reports[0])).toMatchObject({
+      where: "teaching-loop",
+      message: "editor was disposed",
+    })
   })
 
   it("does not leave a page marked taught when its drawing failed", async () => {

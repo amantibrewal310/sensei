@@ -72,6 +72,17 @@ The `least(...)` handles the one edge the naive `>= date_trunc('month', now())` 
 
 ## Phase 2 — Observability: give the alarms a bell (finding 2.2)
 
+> **Shipped 2026-08-09.** §2.2: a spend section on the admin page — global bar, per-user,
+> per-route with p95 `ms` (amber at 45s); queries verified against Neon per the repo rule,
+> and the derived global total cross-checked against a direct sum. §2.3: client errors report
+> through `POST /api/client-error` into the server log stream as `{"at":"client-error"}` —
+> the drain from §2.1 is the alerting pipeline, so no second vendor; wired into `app/error.tsx`
+> and the `runFrom`/`replay` catches, with the hook test proving a client bug both surfaces
+> and reports. §2.4: `GET /api/health` (unguarded, DB-free, exemption recorded in
+> `tests/routes.test.ts`) and an `{"at":"boot","sha"}` line via `instrumentation.ts`.
+> §2.1's remaining work is vendor-side clicks — attach the drain, define the alerts, point an
+> uptime monitor — and is written down as `docs/setup.md` §5.
+
 The logging *format* is already right (structured, greppable, one line per event). The work is adding consumers, in increasing order of effort:
 
 ### 2.1 A log drain and two alerts — **S**

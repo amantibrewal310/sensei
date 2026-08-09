@@ -4,8 +4,9 @@ import { asc, desc, sql } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db, users } from "@/lib/db"
 import { decide } from "./actions"
+import { Spend } from "./spend"
 
-export const metadata = { title: "Approvals — sensei" }
+export const metadata = { title: "Admin — sensei" }
 
 // Never cached. The whole page is "who is waiting right now", and a stale
 // answer to that is worse than a slow one.
@@ -135,6 +136,8 @@ export default async function Admin() {
         the database, not from a token they would have to sign out to refresh. They are
         not emailed about it.
       </p>
+
+      <Spend />
     </main>
   )
 }
