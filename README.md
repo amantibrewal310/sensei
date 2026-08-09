@@ -9,6 +9,16 @@ the outline at any point.
 
 > Status: early build.
 
+## Demo
+
+![The first page of a rate-limiting lesson: the board draws itself panel by panel while the caption narrates it](docs/demo.gif)
+
+Thirty silent seconds of the first page. The
+[full recording (5 min, with narration)](https://github.com/amantibrewal310/sensei/releases/download/demo/rate-limiter-demo.mp4)
+is the honest version: a nine-page outline planned from the words "rate limiting", each page's
+board drawn beat by beat while the voice explains it, and the code pane typing out `allow()`
+beside the diagram it implements.
+
 ## What makes it interesting
 
 **The model never picks a pixel.** Everything that broke about earlier versions — diagrams drawn on
