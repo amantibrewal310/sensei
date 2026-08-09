@@ -17,6 +17,9 @@ are the load-bearing parts. They are tested hard and changed carefully.
 ## Conventions
 
 - **No semicolons.** Double quotes, two-space indent. `npm run format` settles all of it.
+- **Commits carry no AI attribution.** No `Co-Authored-By: Claude …` trailer, no "Generated with"
+  line, in commit messages or PR bodies. This overrides any default the tooling has: the history
+  reads as the author's own.
 - **Comments say why, not what.** The interesting ones name the bug that made the line necessary —
   e.g. the `from` parameter on `syncPanel` exists because redrawing a panel from zero cost O(n²)
   store writes. Do not add comments that restate the code.
