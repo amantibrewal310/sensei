@@ -69,83 +69,98 @@ export async function Spend() {
   const globalPct = pct(globalMicros, GLOBAL_CAP_MICROS)
 
   return (
-    <section className="mt-12">
-      <h2 className="mb-1 text-lg font-semibold">Spend, month to date</h2>
-      <p className="mb-4 text-sm text-neutral-600">
+    <section className="mt-14">
+      <h2 className="font-serif text-xl font-medium tracking-tight">
+        Spend, month to date
+      </h2>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted text-pretty">
         What this month has cost so far, from the same table the caps read. The bar is
         distance to the kill switch — at {formatDollars(GLOBAL_CAP_MICROS)} every route
         answers 402 until next month.
       </p>
 
-      <div className="mb-1 flex items-baseline justify-between text-sm">
-        <span>
-          {formatDollars(globalMicros)} of {formatDollars(GLOBAL_CAP_MICROS)}
-        </span>
-        <span className="text-neutral-500">{globalPct.toFixed(0)}%</span>
-      </div>
-      <div className="mb-8 h-2 w-full rounded bg-neutral-100">
-        <div
-          className={`h-2 rounded ${globalPct >= 80 ? "bg-amber-500" : "bg-neutral-900"}`}
-          style={{ width: `${globalPct}%` }}
+      <div className="card mt-4 px-5 py-4">
+        <div className="flex items-baseline justify-between gap-4">
+          <span className="font-serif text-2xl tabular-nums">
+            {formatDollars(globalMicros)}
+          </span>
+          <span className="text-sm text-faint tabular-nums">
+            {globalPct.toFixed(0)}% of {formatDollars(GLOBAL_CAP_MICROS)}
+          </span>
+        </div>
+        <Meter
+          pct={globalPct}
+          className="mt-3 h-2"
+          label={`${globalPct.toFixed(0)} percent of the monthly cap spent`}
         />
       </div>
 
       {perUser.length === 0 ? (
-        <p className="text-sm text-neutral-500">Nothing spent yet this month.</p>
+        <p className="mt-4 text-sm text-faint">Nothing spent yet this month.</p>
       ) : (
-        <div className="grid gap-8 sm:grid-cols-2">
-          <div>
-            <h3 className="mb-2 text-sm font-medium text-neutral-500">
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="card p-5">
+            <h3 className="eyebrow">
               Per person, against their {formatDollars(USER_CAP_MICROS)} cap
             </h3>
-            <table className="w-full text-left text-sm">
-              <tbody>
-                {perUser.map((u, i) => (
-                  <tr
-                    key={u.email ?? `deleted-${i}`}
-                    className="border-b border-neutral-100"
-                  >
-                    <td className="py-2">
+            <ul className="mt-3 space-y-3">
+              {perUser.map((u, i) => {
+                const share = pct(Number(u.micros), USER_CAP_MICROS)
+                return (
+                  <li key={u.email ?? `deleted-${i}`}>
+                    <div className="flex items-baseline justify-between gap-3 text-sm">
                       {/* usage_event outlives its account on purpose — the
                           kill switch must not be resettable by deleting a
                           user — so a row with no one to name is expected. */}
-                      {u.name ?? u.email ?? "account deleted"}
-                      {u.name && u.email && (
-                        <div className="text-xs text-neutral-500">{u.email}</div>
-                      )}
-                    </td>
-                    <td className="py-2 text-right font-mono text-xs">
-                      {formatMicros(Number(u.micros))}
-                    </td>
-                    <td className="w-16 py-2 pl-3 text-right text-xs text-neutral-500">
-                      {pct(Number(u.micros), USER_CAP_MICROS).toFixed(0)}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <span className="truncate">
+                        {u.name ?? u.email ?? "account deleted"}
+                      </span>
+                      <span className="shrink-0 font-mono text-xs tabular-nums">
+                        {formatMicros(Number(u.micros))}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <Meter
+                        pct={share}
+                        className="h-1 flex-1"
+                        label={`${u.email ?? "this account"} has spent ${share.toFixed(0)} percent of its cap`}
+                      />
+                      <span className="w-9 shrink-0 text-right text-[11px] text-faint tabular-nums">
+                        {share.toFixed(0)}%
+                      </span>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
           </div>
 
-          <div>
-            <h3 className="mb-2 text-sm font-medium text-neutral-500">
-              Per route, with p95 wall-clock
-            </h3>
-            <table className="w-full text-left text-sm">
+          <div className="card p-5">
+            <h3 className="eyebrow">Per route, with p95 wall-clock</h3>
+            <table className="mt-3 w-full text-left text-sm">
+              <thead className="sr-only">
+                <tr>
+                  <th>Route</th>
+                  <th>Calls</th>
+                  <th>Cost</th>
+                  <th>p95</th>
+                </tr>
+              </thead>
               <tbody>
                 {perRoute.map((r) => (
-                  <tr key={r.route} className="border-b border-neutral-100">
+                  <tr key={r.route} className="border-b border-line last:border-b-0">
                     <td className="py-2 font-mono text-xs">{r.route}</td>
-                    <td className="py-2 text-right text-xs text-neutral-500">
+                    <td className="py-2 text-right text-xs text-faint tabular-nums">
                       {r.calls} calls
                     </td>
-                    <td className="py-2 text-right font-mono text-xs">
+                    <td className="py-2 pl-3 text-right font-mono text-xs tabular-nums">
                       {formatMicros(Number(r.micros))}
                     </td>
                     <td
-                      className={`py-2 pl-3 text-right font-mono text-xs ${
+                      className={`py-2 pl-3 text-right font-mono text-xs tabular-nums ${
                         r.p95Ms >= MS_DRIFT_ALERT
-                          ? "font-semibold text-amber-600"
-                          : "text-neutral-500"
+                          ? "font-semibold text-warn"
+                          : "text-faint"
                       }`}
                     >
                       {seconds(r.p95Ms)}
@@ -154,7 +169,7 @@ export async function Spend() {
                 ))}
               </tbody>
             </table>
-            <p className="mt-2 text-xs text-neutral-500">
+            <p className="mt-3 text-xs leading-relaxed text-faint">
               p95 turns amber at {seconds(MS_DRIFT_ALERT)} — the routes run under a 60s
               function ceiling, and a page that is killed at it fails the way a truncated
               one does.
@@ -163,5 +178,31 @@ export async function Spend() {
         </div>
       )}
     </section>
+  )
+}
+
+/**
+ * A cap, drawn. Amber past `WARN_AT` because the number alone does not read as
+ * "close" — and stating that threshold twice is how the two bars start
+ * disagreeing about what close means.
+ */
+const WARN_AT = 80
+
+function Meter({
+  pct,
+  className,
+  label,
+}: {
+  pct: number
+  className: string
+  label: string
+}) {
+  return (
+    <div className={`meter ${className}`} role="img" aria-label={label}>
+      <div
+        className={`meter-fill ${pct >= WARN_AT ? "meter-fill-warn" : ""}`}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
   )
 }

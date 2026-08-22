@@ -1,7 +1,7 @@
 import { signOut } from "@/lib/auth"
 
 /** The sign-out form every signed-in page renders; the server action lives here once. */
-export function SignOutButton({ className }: { className: string }) {
+export function SignOutButton({ className }: { className?: string }) {
   return (
     <form
       action={async () => {
@@ -9,7 +9,7 @@ export function SignOutButton({ className }: { className: string }) {
         await signOut({ redirectTo: "/login" })
       }}
     >
-      <button className={className}>Sign out</button>
+      <button className={className ?? "btn btn-ghost btn-sm"}>Sign out</button>
     </form>
   )
 }

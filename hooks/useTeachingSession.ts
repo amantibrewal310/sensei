@@ -16,7 +16,8 @@ import { layoutBoard, panelById, type Layout } from "@/lib/layout"
 import { renderPanel } from "@/lib/render"
 import type { TeacherAction } from "@/lib/types"
 
-type Status = "idle" | "planning" | "teaching" | "done"
+/** The lesson lifecycle. Exported because the status pill keys a `Record` off it. */
+export type Status = "idle" | "planning" | "teaching" | "done"
 export type Msg = { role: "user" | "assistant"; text: string }
 
 /**
@@ -134,6 +135,10 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   // with it exactly as its diagram comes back.
   const [code, setCode] = useState<Record<string, Snippet[]>>({})
   const [status, setStatus] = useState<Status>("idle")
+  // Mirrors `topicRef` into render. A replay learns its topic from the stored
+  // row rather than from the URL, and the lesson bar has nothing else to name
+  // it by — it showed an ellipsis for the whole replay.
+  const [topic, setTopic] = useState("")
   const [caption, setCaption] = useState("")
   // The caption is replaced by the next sentence, so on its own it is a lesson
   // you cannot look back at. This is the same text kept, and it is what makes
@@ -564,6 +569,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   const resetLesson = useCallback(
     (topic: string, pages: Page[], replaying: boolean) => {
       topicRef.current = topic
+      setTopic(topic)
       pagesRef.current = pages
       stateRef.current.clear()
       transcriptRef.current = []
@@ -841,6 +847,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
     replay,
     ask,
     goTo,
+    topic,
     pages,
     currentIndex,
     taught,

@@ -114,6 +114,18 @@ canvas — and, in production, a license key: the SDK unmounts itself in unlicen
 The free tier's key (`NEXT_PUBLIC_TLDRAW_LICENSE_KEY`) keeps the watermark and is enough for a
 pilot.
 
+## The interface
+
+Ink on paper, and the board is the product: the chrome is warm neutrals and one accent, and the
+canvas keeps its paper in both light and dark because the lesson is drawn in black ink. Page
+titles, the topic and the spoken caption are set in a serif — that is the lesson's voice — while
+labels, counts and status are sans, and code is mono in a pane of its own.
+
+Tokens live in [`app/globals.css`](app/globals.css) as one `light-dark()` value each, so a theme is
+one definition rather than two that drift, and `<html data-theme>` overrides the system preference
+before first paint. What every token means, and which rules are not negotiable, is written down in
+[`design-system/sensei/MASTER.md`](design-system/sensei/MASTER.md).
+
 ## Getting started
 
 ```bash
@@ -169,8 +181,10 @@ page taught.
 
 ## Not done yet
 
-- **Mobile.** `/learn` is a fixed three-pane layout and is unusable below tablet width. A whiteboard
-  you watch being drawn wants the room; this is a desktop app on purpose, but it should say so.
+- **Mobile is usable, not comfortable.** The three panes collapse below `lg` — the outline becomes a
+  drawer, the code pane stacks under the board — so nothing is unreachable on a phone. But a
+  whiteboard you watch being drawn wants the room, and at 390px it does not get it. The collapse is
+  by construction rather than by measurement — it has not been checked on a handset.
 - **Replay re-synthesises narration.** Everything Anthropic produced is stored and read back, so a
   replay makes **no** call to Anthropic — but the voice is generated again, at about $0.08 a lesson.
   Storing audio is a different problem and is not solved here.

@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
 
+export const metadata = { title: "Lesson — sensei" }
+
 // The gate for the lesson page, as a layout rather than inside the page.
 //
 // /learn is a client component — it has to be, it drives a canvas — and a

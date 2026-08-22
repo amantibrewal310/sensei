@@ -1,31 +1,354 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Ink on paper.
+
+   The whiteboard is the product, so everything around it is deliberately
+   quiet: warm neutrals, one accent, no gradient anywhere near the canvas
+   that would compete with what is being drawn on it.
+
+   Both themes live in one `light-dark()` value per token rather than in a
+   duplicated dark block, because a token that exists in two places is a
+   token that eventually disagrees with itself. `color-scheme` on :root is
+   what switches them, so the toggle sets one property.
+   ───────────────────────────────────────────────────────────────────────── */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light dark;
+
+  /* Surfaces */
+  --bg: light-dark(#f7f6f2, #121211);
+  --surface: light-dark(#ffffff, #1a1a18);
+  --surface-2: light-dark(#faf9f6, #212120);
+  --surface-hover: light-dark(#f3f1ec, #262624);
+
+  /* Ink */
+  --text: light-dark(#17170f, #f0efea);
+  --text-muted: light-dark(#5c5a52, #a3a09a);
+  /* Metadata only — but still text, so it clears 4.5:1 on every surface it
+     lands on, including the hover fill. The first pass at these two was a
+     shade prettier and failed at 3.3:1. */
+  --text-faint: light-dark(#6f6c64, #918f89);
+  --border: light-dark(#e5e2d9, #2c2c29);
+  /* The boundary of a control, not a divider: an input sits on the same
+     white as the card behind it, so this hairline is the only thing saying
+     where the field is — and WCAG 1.4.11 wants 3:1 for exactly that. */
+  --border-strong: light-dark(#928e83, #75736d);
+
+  /* One accent: the colour of "the lesson is happening". */
+  --accent: light-dark(#0f766e, #2dd4bf);
+  --accent-hover: light-dark(#115e59, #5eead4);
+  --accent-soft: light-dark(#e6f4f1, #14312e);
+  --on-accent: light-dark(#ffffff, #04211f);
+
+  /* Solid ink buttons — the primary action everywhere. */
+  --solid: light-dark(#1c1c17, #f0efea);
+  --solid-hover: light-dark(#333329, #ffffff);
+  --on-solid: light-dark(#fbfaf7, #121211);
+
+  /* Status. Amber is "waiting on a person", red is "the app broke". */
+  --warn: light-dark(#a35b06, #f0b429);
+  --warn-soft: light-dark(#fdf3e3, #33240a);
+  --danger: light-dark(#b42318, #fca5a5);
+  --danger-soft: light-dark(#fdeceb, #3a1512);
+
+  /* Translucent copies of the surfaces, for the sticky headers. Kept as
+     their own tokens rather than written as `bg-bg/85`: an opacity modifier
+     compiles to a color-mix() around a light-dark() value, and that pair is
+     one browser bug away from a header with no background at all. */
+  --bg-glass: light-dark(#f7f6f2e0, #121211e0);
+  --surface-glass: light-dark(#ffffffe0, #1a1a18e0);
+
+  /* Hairlines tinted by their status colour, for the same reason. */
+  --accent-line: light-dark(#0f766e40, #2dd4bf3d);
+  --warn-line: light-dark(#a35b0640, #f0b4293d);
+  --danger-line: light-dark(#b4231840, #fca5a53d);
+
+  /* The board keeps its paper in both themes. A whiteboard is an object in
+     the room, not a surface that inverts — and the lesson is drawn in black
+     ink, which a dark canvas would simply hide. */
+  --board: light-dark(#ffffff, #f2f0ea);
+
+  --ring: var(--accent);
+  --shadow-sm: 0 1px 2px light-dark(rgb(23 23 15 / 0.06), rgb(0 0 0 / 0.4));
+  --shadow-md:
+    0 1px 2px light-dark(rgb(23 23 15 / 0.05), rgb(0 0 0 / 0.35)),
+    0 8px 24px -12px light-dark(rgb(23 23 15 / 0.16), rgb(0 0 0 / 0.6));
+  --shadow-lg:
+    0 1px 2px light-dark(rgb(23 23 15 / 0.05), rgb(0 0 0 / 0.35)),
+    0 24px 48px -24px light-dark(rgb(23 23 15 / 0.22), rgb(0 0 0 / 0.7));
+
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-hover: var(--surface-hover);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-solid: var(--solid);
+  --color-on-solid: var(--on-solid);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-board: var(--board);
+  --color-glass: var(--bg-glass);
+  --color-surface-glass: var(--surface-glass);
+  --color-warn-line: var(--warn-line);
+  --color-danger-line: var(--danger-line);
+
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-plex-serif), ui-serif, Georgia, serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
+
+  --radius-card: 0.875rem;
+
+  --shadow-soft: var(--shadow-sm);
+  --shadow-raised: var(--shadow-md);
+  --shadow-float: var(--shadow-lg);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* One focus ring for the whole app. Never removed — only shaped. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+
+  /* Scrollbars inside panes, which are narrow and would otherwise be mostly
+     scrollbar. */
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .scroll-slim::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 99px;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  /* Buttons repeat on six pages; written once here rather than as a dozen
+     utilities re-typed each time and drifting apart. Every variant is 36px
+     tall or more and states are never colour-only. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.625rem;
+    border: 1px solid transparent;
+    padding: 0.5rem 0.875rem;
+    min-height: 2.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 180ms var(--ease),
+      border-color 180ms var(--ease),
+      color 180ms var(--ease),
+      box-shadow 180ms var(--ease),
+      opacity 180ms var(--ease),
+      transform 120ms var(--ease);
+  }
+  .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  /* The press. Hover says a thing is a button; only this says the click
+     landed — which on the lesson page matters, because the next/prev buttons
+     are pressed against a canvas that takes a beat to redraw. */
+  .btn:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  .btn-primary {
+    background: var(--solid);
+    color: var(--on-solid);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--solid-hover);
+  }
+
+  .btn-accent {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  .btn-accent:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--text);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--surface-hover);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-muted);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+
+  .btn-sm {
+    min-height: 2rem;
+    padding: 0.3125rem 0.625rem;
+    font-size: 0.8125rem;
+    border-radius: 0.5rem;
+  }
+  .btn-lg {
+    min-height: 3rem;
+    padding: 0.75rem 1.25rem;
+    font-size: 0.9375rem;
+    border-radius: 0.75rem;
+  }
+  .btn-icon {
+    padding: 0;
+    width: 2.375rem;
+    min-height: 2.375rem;
+  }
+  /* Declared after `.btn-icon` and at higher specificity because otherwise the
+     later rule wins whatever order the classes sit in the attribute, and every
+     small icon button had to re-state its own size in utilities. */
+  .btn-sm.btn-icon {
+    width: 2rem;
+    min-height: 2rem;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+  }
+
+  .field {
+    width: 100%;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: 0.625rem;
+    padding: 0.625rem 0.875rem;
+    font-size: 0.9375rem;
+    transition:
+      border-color 180ms var(--ease),
+      box-shadow 180ms var(--ease);
+  }
+  .field::placeholder {
+    color: var(--text-faint);
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  /* Small capitalised label above a group. The one typographic mannerism
+     this design allows itself. */
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 99px;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.5;
+    border: 1px solid transparent;
+  }
+  .badge-neutral {
+    background: var(--surface-2);
+    color: var(--text-muted);
+    border-color: var(--border);
+  }
+  .badge-accent {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-line);
+  }
+  .badge-warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-color: var(--warn-line);
+  }
+  .badge-danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: var(--danger-line);
+  }
+
+  /* A progress track. Three of these — the outline, and both spend bars —
+     were the same two divs re-typed, down to the 500ms width transition. */
+  .meter {
+    width: 100%;
+    overflow: hidden;
+    border-radius: 99px;
+    background: var(--surface-2);
+  }
+  .meter-fill {
+    height: 100%;
+    border-radius: 99px;
+    background: var(--accent);
+    transition: width 500ms var(--ease);
+  }
+  .meter-fill-warn {
+    background: var(--warn);
+  }
 }
 
-/* Code lines arrive one at a time; each fades in as it lands. */
+/* ─── Motion ──────────────────────────────────────────────────────────────
+   Code lines arrive one at a time; each fades in as it lands. */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -35,4 +358,59 @@ body {
     opacity: 1;
     transform: none;
   }
+}
+
+/* The "still going" dot. Breathing rather than blinking: a hard blink beside
+   a caption reads as an error light. */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+@keyframes drift {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: -200% 50%;
+  }
+}
+
+/* A planning skeleton, so the outline has a shape before the plan lands. */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 0%,
+    var(--surface-hover) 40%,
+    var(--surface-2) 80%
+  );
+  background-size: 200% 100%;
+  animation: drift 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─── The board ───────────────────────────────────────────────────────────
+   tldraw scopes its own `--color-background` to `.tl-container.tl-theme__*`,
+   so the override has to be at least as specific and land on that element —
+   setting it on an ancestor is silently discarded. */
+.board-surface .tl-container {
+  --color-background: var(--board);
+  background: var(--board);
 }

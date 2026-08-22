@@ -1,11 +1,16 @@
 "use client"
 
-import { Suspense, memo, useEffect, useRef, useState } from "react"
+import { Suspense, memo, useCallback, useEffect, useRef, useState } from "react"
 import dynamic from "next/dynamic"
+import Link from "next/link"
 import { useSearchParams } from "next/navigation"
+import { AskForm } from "@/components/AskForm"
+import { CaptionDock } from "@/components/CaptionDock"
 import { CodePane } from "@/components/CodePane"
+import { AlertIcon, BoardIcon } from "@/components/Icons"
+import { LessonBar } from "@/components/LessonBar"
 import { Outline } from "@/components/Outline"
-import { ProgressStrip } from "@/components/ProgressStrip"
+import { StageHeader } from "@/components/StageHeader"
 import { useTeachingSession } from "@/hooks/useTeachingSession"
 import type { CanvasApi } from "@/components/Board"
 
@@ -29,6 +34,11 @@ function LearnInner() {
 
   const session = useTeachingSession(canvas)
 
+  // Below `lg` the outline is a drawer rather than a rail. A whiteboard being
+  // drawn wants the whole window, and 288px of index on a 390px screen leaves
+  // it none.
+  const [outlineOpen, setOutlineOpen] = useState(false)
+
   useEffect(() => {
     if (startedRef.current) return
     if (lesson) {
@@ -40,131 +50,160 @@ function LearnInner() {
     }
   }, [lesson, topic, session])
 
+  /**
+   * Closing the drawer puts focus back on the button that opened it. Without
+   * this the element holding focus — a step, or the close button — unmounts,
+   * focus falls to <body>, and a keyboard user resumes from the top of the
+   * document. It no-ops when the drawer is shut, so the page buttons in the
+   * stage header do not yank focus to a hamburger nobody pressed.
+   */
+  const dismissOutline = useCallback(() => {
+    if (!outlineOpen) return
+    setOutlineOpen(false)
+    document.getElementById("outline-toggle")?.focus()
+  }, [outlineOpen])
+
+  useEffect(() => {
+    if (!outlineOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") dismissOutline()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [outlineOpen, dismissOutline])
+
+  const openOutline = useCallback(() => setOutlineOpen(true), [])
+
+  // Stable identities all the way down: the bar, the outline, the stage header
+  // and the caption are all memo'd, and a fresh arrow function here would
+  // re-render every one of them on each 90ms code tick.
+  const { goTo } = session
+  const select = useCallback(
+    (index: number) => {
+      dismissOutline()
+      goTo(index)
+    },
+    [dismissOutline, goTo],
+  )
+
+  const page = session.pages[session.currentIndex]
+  // The URL carries the topic when teaching; a replay learns it from the row
+  // it read back, and only the hook knows that one.
+  const heading = session.topic || topic
+
+  // The rail and the drawer are the same outline at two breakpoints; only the
+  // close button differs.
+  const outline = {
+    topic: heading,
+    pages: session.pages,
+    currentIndex: session.currentIndex,
+    taught: session.taught,
+    onSelect: select,
+  }
+
   return (
-    <div className="flex h-screen bg-neutral-50">
-      <Outline
-        topic={topic}
-        pages={session.pages}
-        currentIndex={session.currentIndex}
-        taught={session.taught}
-        onSelect={session.goTo}
+    <div className="flex h-dvh flex-col overflow-hidden bg-bg">
+      <LessonBar
+        topic={heading}
+        status={session.status}
+        soundBlocked={session.soundBlocked}
+        onEnableSound={session.enableSound}
+        onOpenOutline={openOutline}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between border-b border-neutral-200 bg-white">
-          <ProgressStrip
-            page={session.pages[session.currentIndex]}
-            index={session.currentIndex}
-            total={session.pages.length}
-          />
-          {/* Not a "turn voice on" switch — the lesson always narrates. This
-              only appears if the browser refused to play audio without a
-              gesture, which happens when /learn is opened directly rather than
-              reached from the home page. */}
-          {session.soundBlocked && (
+      <div className="flex min-h-0 flex-1">
+        <div className="hidden lg:flex">
+          <Outline {...outline} />
+        </div>
+
+        {outlineOpen && (
+          <div
+            className="fixed inset-0 z-40 lg:hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Lesson outline"
+          >
             <button
-              className="m-2 rounded border border-neutral-300 px-3 py-1 text-sm"
-              onClick={session.enableSound}
-            >
-              🔊 Turn on sound
-            </button>
-          )}
-        </div>
-
-        <div className="flex min-h-0 flex-1">
-          {/* The board is a canvas: to anything that is not an eye it is one
-              opaque element. The label says what it is, and the transcript
-              below carries what it was drawn to illustrate. */}
-          <div
-            className="relative min-w-0 flex-1"
-            role="img"
-            aria-label={`Whiteboard for “${session.pages[session.currentIndex]?.title ?? "the lesson"}”`}
-          >
-            <Board api={canvas} />
-          </div>
-          <CodePane snippets={session.code} />
-        </div>
-
-        {/* Distinct from the caption on purpose: the caption is the lesson
-            talking, this is the app admitting it broke. `role="alert"` so it is
-            announced rather than silently appearing under a canvas nobody is
-            reading. */}
-        {session.error && (
-          <div
-            role="alert"
-            className="border-t border-red-200 bg-red-50 px-6 py-3 text-center text-sm text-red-800"
-          >
-            {session.error}
+              className="absolute inset-0 bg-black/45"
+              aria-label="Close the outline"
+              onClick={dismissOutline}
+            />
+            <div className="absolute inset-y-0 left-0 animate-[fadeIn_140ms_ease-out] shadow-float">
+              <Outline {...outline} onClose={dismissOutline} />
+            </div>
           </div>
         )}
 
-        <div className="min-h-16 border-t border-neutral-200 bg-white px-6 py-4">
-          {/* The lesson is audio and canvas, so this line is the only part of
-              it a screen reader can reach. `polite` rather than `assertive`:
-              sentences arrive every few seconds and interrupting the reader
-              each time would make it unusable. */}
-          <p
-            role="status"
-            aria-live="polite"
-            className="mx-auto max-w-3xl text-center text-lg leading-snug text-neutral-800"
-          >
-            {session.caption}
-          </p>
+        <main className="flex min-w-0 flex-1 flex-col">
+          <StageHeader
+            page={page}
+            index={session.currentIndex}
+            total={session.pages.length}
+            onSelect={select}
+          />
 
-          {/* Closed by default — the lesson is meant to be watched. Open, it
-              answers "what did it just say", which is the same question a
-              screen reader user has and a distracted one does too. `summary`
-              is focusable on its own, so this needs no keyboard handling. */}
-          {session.spoken.length > 0 && (
-            <details className="mx-auto mt-2 max-w-3xl text-sm text-neutral-500">
-              <summary className="cursor-pointer text-center">
-                What was said ({session.spoken.length})
-              </summary>
-              <ol className="mt-2 space-y-1">
-                {session.spoken.map((line, i) => (
-                  <li key={`${i}-${line.slice(0, 24)}`}>{line}</li>
-                ))}
-              </ol>
-            </details>
+          {/* Stacked on a phone, side by side from `lg`. The board keeps the
+              room either way; the code pane takes a fixed slice of what is
+              left and only exists while there is code on the page. */}
+          <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+            <div className="relative flex min-h-0 min-w-0 flex-1 p-2 sm:p-3">
+              {/* The board is a canvas: to anything that is not an eye it is
+                  one opaque element. The label says what it is, and the
+                  caption below carries what it was drawn to illustrate. */}
+              <div
+                className="board-surface relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-line bg-board shadow-soft"
+                role="img"
+                aria-label={`Whiteboard for “${page?.title ?? "the lesson"}”`}
+              >
+                <Board api={canvas} />
+              </div>
+
+              {/* Sibling of the canvas, not a child of it: a link inside
+                  role="img" is a link no assistive technology will offer. */}
+              {!topic && !lesson && <NothingToTeach />}
+            </div>
+
+            <CodePane snippets={session.code} />
+          </div>
+
+          {/* Distinct from the caption on purpose: the caption is the lesson
+              talking, this is the app admitting it broke. `role="alert"` so it
+              is announced rather than silently appearing under a canvas nobody
+              is reading. */}
+          {session.error && (
+            <div
+              role="alert"
+              className="flex shrink-0 items-center justify-center gap-2 border-t border-danger-line bg-danger-soft px-6 py-3 text-center text-sm text-danger"
+            >
+              <AlertIcon className="h-4 w-4 shrink-0" />
+              {session.error}
+            </div>
           )}
-        </div>
 
-        <AskForm onAsk={session.ask} />
+          <CaptionDock caption={session.caption} spoken={session.spoken} />
+
+          {session.pages.length > 0 && <AskForm onAsk={session.ask} />}
+        </main>
       </div>
     </div>
   )
 }
 
-// Its own component so the keystroke state is its own too: typing a question
-// used to re-render the whole page — outline, transcript, canvas — per key.
-function AskForm({ onAsk }: { onAsk: (text: string) => void }) {
-  const [ask, setAsk] = useState("")
-
+/** /learn opened with no topic and no lesson — a blank board and no explanation. */
+function NothingToTeach() {
   return (
-    <form
-      className="flex gap-2 border-t border-neutral-200 bg-white p-3"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (ask.trim()) {
-          onAsk(ask.trim())
-          setAsk("")
-        }
-      }}
-    >
-      {/* A placeholder is not a label: it disappears the moment anyone
-          types, and it is not what a screen reader announces the field by. */}
-      <label className="sr-only" htmlFor="ask">
-        Ask a question about this page
-      </label>
-      <input
-        id="ask"
-        className="flex-1 rounded border border-neutral-300 p-2"
-        placeholder="Ask a question…"
-        value={ask}
-        onChange={(e) => setAsk(e.target.value)}
-      />
-      <button className="rounded bg-neutral-900 px-4 text-white">Ask</button>
-    </form>
+    <div className="absolute inset-0 grid place-items-center p-6">
+      <div className="max-w-xs text-center">
+        <BoardIcon className="mx-auto h-7 w-7 text-faint" />
+        <p className="mt-3 font-serif text-lg font-medium">An empty board</p>
+        <p className="mt-1.5 text-sm leading-relaxed text-muted text-pretty">
+          Nothing is being taught here yet. Lessons start from a topic.
+        </p>
+        <Link href="/" className="btn btn-primary mt-4">
+          Pick a topic
+        </Link>
+      </div>
+    </div>
   )
 }
 

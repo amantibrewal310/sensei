@@ -23,6 +23,8 @@ are the load-bearing parts. They are tested hard and changed carefully.
 - **Comments say why, not what.** The interesting ones name the bug that made the line necessary —
   e.g. the `from` parameter on `syncPanel` exists because redrawing a panel from zero cost O(n²)
   store writes. Do not add comments that restate the code.
+- **Prose goes through the `unslop` skill.** Run `/unslop` over README, `docs/`, commit messages
+  and PR bodies before they land.
 - **zod validates every boundary.** Request bodies (`lib/request.ts`), and model output, always.
   `output_config.format` makes malformed output unlikely, not impossible.
 - **Costs are integer micros**, never floats — `lib/usage.ts`.

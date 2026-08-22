@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useEffect } from "react"
 import { reportClientError } from "@/lib/report"
+import { AlertIcon } from "@/components/Icons"
 
 // The last line of defence, and the reason it exists is `components/Board.tsx`:
 // it drives tldraw's store imperatively — creating pages, deriving shape ids,
@@ -29,26 +30,33 @@ export default function Error({
   }, [error])
 
   return (
-    <main className="flex h-screen flex-col items-center justify-center gap-4 p-8 text-center">
-      <h1 className="text-2xl font-semibold">The lesson hit a snag.</h1>
-      <p className="max-w-md text-neutral-500">
+    <main className="flex flex-1 flex-col items-center justify-center px-4 py-12 text-center">
+      <span className="grid h-11 w-11 place-items-center rounded-xl border border-danger-line bg-danger-soft text-danger">
+        <AlertIcon className="h-5 w-5" />
+      </span>
+
+      <h1 className="mt-5 font-serif text-2xl font-medium tracking-tight">
+        The lesson hit a snag.
+      </h1>
+      <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted text-pretty">
         Something broke while drawing. The board can&rsquo;t be recovered, but starting
         the lesson again usually works.
       </p>
-      {error.digest && (
-        <p className="font-mono text-xs text-neutral-400">{error.digest}</p>
-      )}
-      <div className="flex gap-2">
-        <button
-          onClick={reset}
-          className="rounded bg-neutral-900 px-4 py-2 text-sm text-white"
-        >
+
+      <div className="mt-7 flex flex-wrap justify-center gap-2">
+        <button onClick={reset} className="btn btn-primary">
           Try again
         </button>
-        <Link href="/" className="rounded border border-neutral-300 px-4 py-2 text-sm">
+        <Link href="/" className="btn btn-secondary">
           Pick another topic
         </Link>
       </div>
+
+      {error.digest && (
+        <p className="mt-8 font-mono text-[11px] text-faint">
+          <span className="eyebrow">digest</span> {error.digest}
+        </p>
+      )}
     </main>
   )
 }
