@@ -56,7 +56,7 @@ A sentence's shapes are drawn _while it is being spoken_, but the next sentence 
 one to finish.
 
 ```
-{"type":"speak","text":"A token bucket holds permits, and it refills at a fixed rate."}
+{"type":"speak","text":"A token bucket holds tokens. It adds a new token at a fixed rate."}
 {"type":"draw","panel":"bucket","what":"the bucket as a container holding three tokens"}
 {"type":"speak","text":"In code it's four lines: refill by elapsed time, then spend one."}
 {"type":"code","label":"allow()","lines":["tokens = min(cap, tokens + r * elapsed)","if tokens < 1:","  return False","tokens -= 1","return True"]}
