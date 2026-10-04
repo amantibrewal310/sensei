@@ -1,16 +1,12 @@
 "use client"
 
-import { Suspense, memo, useCallback, useEffect, useRef, useState } from "react"
+import { Suspense, memo, useEffect, useRef } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { AskForm } from "@/components/AskForm"
-import { CaptionDock } from "@/components/CaptionDock"
-import { CodePane } from "@/components/CodePane"
 import { AlertIcon, BoardIcon } from "@/components/Icons"
 import { LessonBar } from "@/components/LessonBar"
-import { Outline } from "@/components/Outline"
-import { StageHeader } from "@/components/StageHeader"
+import { LessonStream } from "@/components/LessonStream"
 import { useTeachingSession } from "@/hooks/useTeachingSession"
 import type { CanvasApi } from "@/components/Board"
 
@@ -34,11 +30,6 @@ function LearnInner() {
 
   const session = useTeachingSession(canvas)
 
-  // Below `lg` the outline is a drawer rather than a rail. A whiteboard being
-  // drawn wants the whole window, and 288px of index on a 390px screen leaves
-  // it none.
-  const [outlineOpen, setOutlineOpen] = useState(false)
-
   useEffect(() => {
     if (startedRef.current) return
     if (lesson) {
@@ -50,56 +41,10 @@ function LearnInner() {
     }
   }, [lesson, topic, session])
 
-  /**
-   * Closing the drawer puts focus back on the button that opened it. Without
-   * this the element holding focus — a step, or the close button — unmounts,
-   * focus falls to <body>, and a keyboard user resumes from the top of the
-   * document. It no-ops when the drawer is shut, so the page buttons in the
-   * stage header do not yank focus to a hamburger nobody pressed.
-   */
-  const dismissOutline = useCallback(() => {
-    if (!outlineOpen) return
-    setOutlineOpen(false)
-    document.getElementById("outline-toggle")?.focus()
-  }, [outlineOpen])
-
-  useEffect(() => {
-    if (!outlineOpen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") dismissOutline()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [outlineOpen, dismissOutline])
-
-  const openOutline = useCallback(() => setOutlineOpen(true), [])
-
-  // Stable identities all the way down: the bar, the outline, the stage header
-  // and the caption are all memo'd, and a fresh arrow function here would
-  // re-render every one of them on each 90ms code tick.
-  const { goTo } = session
-  const select = useCallback(
-    (index: number) => {
-      dismissOutline()
-      goTo(index)
-    },
-    [dismissOutline, goTo],
-  )
-
   const page = session.pages[session.currentIndex]
   // The URL carries the topic when teaching; a replay learns it from the row
   // it read back, and only the hook knows that one.
   const heading = session.topic || topic
-
-  // The rail and the drawer are the same outline at two breakpoints; only the
-  // close button differs.
-  const outline = {
-    topic: heading,
-    pages: session.pages,
-    currentIndex: session.currentIndex,
-    taught: session.taught,
-    onSelect: select,
-  }
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-bg">
@@ -108,82 +53,59 @@ function LearnInner() {
         status={session.status}
         soundBlocked={session.soundBlocked}
         onEnableSound={session.enableSound}
-        onOpenOutline={openOutline}
+        pages={session.pages}
+        currentIndex={session.currentIndex}
+        taught={session.taught}
+        onSelect={session.goTo}
       />
 
-      <div className="flex min-h-0 flex-1">
-        <div className="hidden lg:flex">
-          <Outline {...outline} />
-        </div>
-
-        {outlineOpen && (
-          <div
-            className="fixed inset-0 z-40 lg:hidden"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Lesson outline"
-          >
-            <button
-              className="absolute inset-0 bg-black/45"
-              aria-label="Close the outline"
-              onClick={dismissOutline}
-            />
-            <div className="absolute inset-y-0 left-0 animate-[fadeIn_140ms_ease-out] shadow-float">
-              <Outline {...outline} onClose={dismissOutline} />
-            </div>
-          </div>
-        )}
-
-        <main className="flex min-w-0 flex-1 flex-col">
-          <StageHeader
-            page={page}
-            index={session.currentIndex}
-            total={session.pages.length}
-            onSelect={select}
-          />
-
-          {/* Stacked on a phone, side by side from `lg`. The board keeps the
-              room either way; the code pane takes a fixed slice of what is
-              left and only exists while there is code on the page. */}
-          <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-            <div className="relative flex min-h-0 min-w-0 flex-1 p-2 sm:p-3">
-              {/* The board is a canvas: to anything that is not an eye it is
-                  one opaque element. The label says what it is, and the
-                  caption below carries what it was drawn to illustrate. */}
-              <div
-                className="board-surface relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-line bg-board shadow-soft"
-                role="img"
-                aria-label={`Whiteboard for “${page?.title ?? "the lesson"}”`}
-              >
-                <Board api={canvas} />
-              </div>
-
-              {/* Sibling of the canvas, not a child of it: a link inside
-                  role="img" is a link no assistive technology will offer. */}
-              {!topic && !lesson && <NothingToTeach />}
+      {/* The board and the teacher's side of the desk: side by side from
+          `lg`, the stream stacked under the board below it. Nothing else
+          gets a column — the outline is in the header and code is a beat in
+          the stream — so the board keeps the room. */}
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2 sm:p-3 lg:pr-0">
+          <div className="relative flex min-h-0 min-w-0 flex-1">
+            {/* The board is a canvas: to anything that is not an eye it is
+                one opaque element. The label says what it is, and the stream
+                beside it carries what it was drawn to illustrate. */}
+            <div
+              className="board-surface relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-line bg-board shadow-soft"
+              role="img"
+              aria-label={`Whiteboard for “${page?.title ?? "the lesson"}”`}
+            >
+              <Board api={canvas} />
             </div>
 
-            <CodePane snippets={session.code} />
+            {/* Sibling of the canvas, not a child of it: a link inside
+                role="img" is a link no assistive technology will offer. */}
+            {!topic && !lesson && <NothingToTeach />}
           </div>
 
-          {/* Distinct from the caption on purpose: the caption is the lesson
-              talking, this is the app admitting it broke. `role="alert"` so it
-              is announced rather than silently appearing under a canvas nobody
-              is reading. */}
+          {/* Distinct from the stream on purpose: the stream is the lesson
+              talking, this is the app admitting it broke. `role="alert"` so
+              it is announced rather than silently appearing under a canvas
+              nobody is reading. */}
           {session.error && (
             <div
               role="alert"
-              className="flex shrink-0 items-center justify-center gap-2 border-t border-danger-line bg-danger-soft px-6 py-3 text-center text-sm text-danger"
+              className="flex shrink-0 items-center justify-center gap-2 rounded-lg border border-danger-line bg-danger-soft px-4 py-2.5 text-center text-sm text-danger"
             >
               <AlertIcon className="h-4 w-4 shrink-0" />
               {session.error}
             </div>
           )}
-
-          <CaptionDock caption={session.caption} spoken={session.spoken} />
-
-          {session.pages.length > 0 && <AskForm onAsk={session.ask} />}
         </main>
+
+        <LessonStream
+          pages={session.pages}
+          currentIndex={session.currentIndex}
+          taught={session.taught}
+          stream={session.stream}
+          live={session.live}
+          caption={session.caption}
+          onAsk={session.ask}
+        />
       </div>
     </div>
   )

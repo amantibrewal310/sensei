@@ -261,4 +261,58 @@ describe("useTeachingSession", () => {
 
     expect(result.current.error).toBe("the model is down")
   })
+
+  it("keeps a page's sentences and code in the order the teacher produced them", async () => {
+    // The rail shows code under the sentence that introduced it, so the hook
+    // has to remember the order — two separate lists cannot say which came first.
+    routes["/api/teach"] = () =>
+      sse(
+        teacherSays(
+          '{"type":"speak","text":"A bucket holds tokens."}',
+          '{"type":"speak","text":"In code, it is two lines."}',
+          '{"type":"code","label":"allow()","lines":["tokens -= 1","return True"]}',
+          '{"type":"speak","text":"That is the whole limiter."}',
+          '{"type":"done"}',
+        ),
+      )
+
+    const { result } = renderHook(() => useTeachingSession(stubCanvas()))
+    await act(() => result.current.start("rate limiting"))
+    await waitFor(() => expect(result.current.taught).toContain("page-1"))
+
+    const page1 = result.current.stream["page-1"] ?? []
+    expect(page1.map((e) => e.kind)).toEqual(["say", "say", "code", "say"])
+    expect(page1[2]).toMatchObject({
+      label: "allow()",
+      lines: ["tokens -= 1", "return True"],
+    })
+    // Nothing is being spoken once the page is done.
+    expect(result.current.live).toBeNull()
+  })
+
+  it("puts the learner's question in the stream of the page it was asked on", async () => {
+    const held = openStream()
+    let turns = 0
+    routes["/api/teach"] = () => (turns++ === 0 ? held.response : openStream().response)
+
+    const { result } = renderHook(() => useTeachingSession(stubCanvas()))
+    await act(async () => {
+      void result.current.start("rate limiting")
+      await settle()
+    })
+    held.push(frame("text", { delta: '{"type":"speak","text":"Hello."}\n' }))
+    await act(() => settle())
+    await waitFor(() => expect(result.current.live).not.toBeNull())
+
+    await act(async () => {
+      result.current.ask("wait, why?")
+      await settle()
+    })
+
+    const page1 = result.current.stream["page-1"] ?? []
+    expect(page1.map((e) => e.kind)).toEqual(["say", "ask"])
+    expect(page1[1]).toMatchObject({ text: "wait, why?" })
+    // The interrupted sentence is no longer the one being spoken.
+    expect(result.current.live).toBeNull()
+  })
 })
