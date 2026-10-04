@@ -85,7 +85,7 @@ function OutlineInner({
                 <span
                   aria-hidden="true"
                   className={`absolute top-9 bottom-0 left-[1.6875rem] w-px ${
-                    taughtHere ? "bg-accent" : "bg-line"
+                    taughtHere ? "bg-solid" : "bg-line"
                   }`}
                 />
               )}
@@ -110,7 +110,7 @@ function OutlineInner({
                 <span
                   className={`z-10 mt-px grid h-5.5 w-5.5 shrink-0 place-items-center rounded-full border text-[11px] tabular-nums ${
                     taughtHere
-                      ? "border-accent bg-accent text-on-accent"
+                      ? "border-solid bg-solid text-on-solid"
                       : current
                         ? "border-accent bg-surface text-accent"
                         : "border-line-strong bg-surface text-faint"

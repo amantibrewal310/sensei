@@ -31,7 +31,7 @@ function SnippetBlock({ snippet }: { snippet: Snippet }) {
       {/* Sticky, because a snippet can be taller than the pane and a label that
           scrolls away leaves fourteen lines of unattributed code. */}
       <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface-glass px-3 py-2 backdrop-blur">
-        <CodeIcon className="h-3.5 w-3.5 shrink-0 text-accent" />
+        <CodeIcon className="h-3.5 w-3.5 shrink-0 text-muted" />
         <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium">
           {snippet.label || "code"}
         </span>
@@ -84,7 +84,7 @@ function CopyButton({ lines, label }: { lines: string[]; label: string }) {
       }}
     >
       {copied ? (
-        <CheckIcon className="h-3.5 w-3.5 text-accent" />
+        <CheckIcon className="h-3.5 w-3.5 text-correct" />
       ) : (
         <CopyIcon className="h-3.5 w-3.5" />
       )}

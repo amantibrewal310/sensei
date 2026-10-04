@@ -44,7 +44,7 @@ function LessonBarInner({
       </Link>
 
       <span className="hidden lg:block">
-        <LogoMark className="h-6 w-6" />
+        <LogoMark className="h-3" />
       </span>
 
       <div className="min-w-0 flex-1 px-1">
@@ -60,7 +60,7 @@ function LessonBarInner({
           happens when /learn is opened directly rather than reached from the
           home page. */}
       {soundBlocked && (
-        <button type="button" onClick={onEnableSound} className="btn btn-accent btn-sm">
+        <button type="button" onClick={onEnableSound} className="btn btn-primary btn-sm">
           <SoundOffIcon />
           <span className="hidden sm:inline">Turn on sound</span>
         </button>
