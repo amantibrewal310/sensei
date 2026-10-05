@@ -4,56 +4,34 @@ import { useEffect, useRef, useState } from "react"
 import { CheckIcon, CodeIcon, CopyIcon } from "@/components/Icons"
 import type { Snippet } from "@/lib/code"
 
-// Code as text, beside the board rather than on it. Real monospace, selectable,
-// copyable, and free to scroll — none of which it had as tldraw shapes.
-
-export function CodePane({ snippets }: { snippets: Snippet[] }) {
-  if (!snippets.length) return null
-
+// Code as text, in the stream under the sentence that introduced it. Real
+// monospace, selectable, copyable, and free to scroll — none of which it had
+// as tldraw shapes.
+export function CodeCard({ snippet }: { snippet: Snippet }) {
+  const label = snippet.label || "code"
   return (
-    // A definite height rather than a share of the column: a percentage
-    // max-height needs a definite parent to resolve against, and if that ever
-    // stops being true it resolves to `none` and this pane crushes the board.
-    <aside
-      aria-label="Code from this page"
-      className="scroll-slim flex max-h-52 shrink-0 flex-col overflow-y-auto border-t border-line bg-surface lg:max-h-none lg:w-[23rem] lg:border-t-0 lg:border-l xl:w-[26rem]"
-    >
-      {snippets.map((snippet) => (
-        <SnippetBlock key={snippet.id} snippet={snippet} />
-      ))}
-    </aside>
-  )
-}
-
-function SnippetBlock({ snippet }: { snippet: Snippet }) {
-  return (
-    <div className="border-b border-line last:border-b-0">
-      {/* Sticky, because a snippet can be taller than the pane and a label that
-          scrolls away leaves fourteen lines of unattributed code. */}
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface-glass px-3 py-2 backdrop-blur">
+    <figure className="overflow-hidden rounded-[10px] border border-line bg-surface">
+      <figcaption className="flex items-center gap-2 border-b border-line py-1 pr-1 pl-3.5">
         <CodeIcon className="h-3.5 w-3.5 shrink-0 text-muted" />
         <span className="min-w-0 flex-1 truncate font-mono text-xs font-medium">
-          {snippet.label || "code"}
+          {label}
         </span>
-        <CopyButton lines={snippet.lines} label={snippet.label || "code"} />
-      </div>
+        <CopyButton lines={snippet.lines} label={label} />
+      </figcaption>
 
-      <pre className="overflow-x-auto px-3 py-3 font-mono text-[12.5px] leading-[1.7]">
+      {/* No line numbers: the rail is sized so MAX_CODE_COLS fits at this
+          size, and a gutter is the 30px that would push line three into a
+          scrollbar. */}
+      <pre className="scroll-slim overflow-x-auto px-3.5 py-3 font-mono text-[12px] leading-[1.6]">
         {snippet.lines.map((line, i) => (
           // Lines arrive one at a time, so each is keyed by position and
           // fades in as it lands — the typing-it-out feel the canvas had.
-          <div key={i} className="flex animate-[fadeIn_180ms_ease-out] gap-3">
-            <span
-              aria-hidden="true"
-              className="w-4 shrink-0 text-right text-faint select-none tabular-nums"
-            >
-              {i + 1}
-            </span>
-            <span className="min-w-0 whitespace-pre">{line || " "}</span>
+          <div key={i} className="animate-[fadeIn_180ms_ease-out] whitespace-pre">
+            {line || " "}
           </div>
         ))}
       </pre>
-    </div>
+    </figure>
   )
 }
 

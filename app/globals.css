@@ -333,8 +333,8 @@
     border-color: var(--danger-line);
   }
 
-  /* A progress track. Three of these — the outline, and both spend bars —
-     were the same two divs re-typed, down to the 500ms width transition. */
+  /* A progress track. The spend bars were the same two divs re-typed,
+     down to the 500ms width transition. */
   .meter {
     width: 100%;
     overflow: hidden;
@@ -390,7 +390,7 @@
   }
 }
 
-/* A planning skeleton, so the outline has a shape before the plan lands. */
+/* A planning skeleton, so the page navigator has a shape before the plan lands. */
 .shimmer {
   background: linear-gradient(
     90deg,

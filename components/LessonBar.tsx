@@ -3,10 +3,12 @@
 import { memo } from "react"
 
 import Link from "next/link"
-import { ArrowLeftIcon, ListIcon, SoundOffIcon } from "@/components/Icons"
+import { ArrowLeftIcon, SoundOffIcon } from "@/components/Icons"
 import { LogoMark } from "@/components/Logo"
+import { PageNav } from "@/components/PageNav"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import type { Status } from "@/hooks/useTeachingSession"
+import type { Page } from "@/lib/lesson"
 
 // memo: this sits on the streaming path — a code page repaints every 90ms
 // (CODE_LINE_MS) and none of these props change with it.
@@ -15,58 +17,69 @@ function LessonBarInner({
   status,
   soundBlocked,
   onEnableSound,
-  onOpenOutline,
+  pages,
+  currentIndex,
+  taught,
+  onSelect,
 }: {
   topic: string
   status: Status
   soundBlocked: boolean
   onEnableSound: () => void
-  onOpenOutline: () => void
+  pages: Page[]
+  currentIndex: number
+  taught: string[]
+  onSelect: (index: number) => void
 }) {
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface px-2 sm:px-3">
-      <button
-        type="button"
-        id="outline-toggle"
-        onClick={onOpenOutline}
-        className="btn btn-ghost btn-icon lg:hidden"
-        aria-label="Open the lesson outline"
-      >
-        <ListIcon />
-      </button>
+      {/* Equal flex on both sides is what keeps the page navigator centred
+          whatever the topic's length. */}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <Link
+          href="/"
+          className="btn btn-ghost btn-icon"
+          aria-label="Leave the lesson and pick another topic"
+        >
+          <ArrowLeftIcon />
+        </Link>
 
-      <Link
-        href="/"
-        className="btn btn-ghost btn-icon"
-        aria-label="Leave the lesson and pick another topic"
-      >
-        <ArrowLeftIcon />
-      </Link>
+        <span className="hidden xl:block">
+          <LogoMark className="h-3" />
+        </span>
 
-      <span className="hidden lg:block">
-        <LogoMark className="h-3" />
-      </span>
-
-      <div className="min-w-0 flex-1 px-1">
-        <p className="truncate font-serif text-[15px] leading-tight font-medium">
+        <h1 className="hidden min-w-0 truncate px-1 font-serif text-[15px] leading-tight font-medium lg:block">
           {topic || "Planning a lesson…"}
-        </p>
+        </h1>
       </div>
 
-      <StatusPill status={status} />
+      <PageNav
+        pages={pages}
+        currentIndex={currentIndex}
+        taught={taught}
+        onSelect={onSelect}
+      />
 
-      {/* Not a "turn voice on" switch — the lesson always narrates. This only
-          appears if the browser refused to play audio without a gesture, which
-          happens when /learn is opened directly rather than reached from the
-          home page. */}
-      {soundBlocked && (
-        <button type="button" onClick={onEnableSound} className="btn btn-primary btn-sm">
-          <SoundOffIcon />
-          <span className="hidden sm:inline">Turn on sound</span>
-        </button>
-      )}
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+        <StatusPill status={status} />
 
-      <ThemeToggle />
+        {/* Not a "turn voice on" switch — the lesson always narrates. This only
+            appears if the browser refused to play audio without a gesture,
+            which happens when /learn is opened directly rather than reached
+            from the home page. */}
+        {soundBlocked && (
+          <button
+            type="button"
+            onClick={onEnableSound}
+            className="btn btn-primary btn-sm"
+          >
+            <SoundOffIcon />
+            <span className="hidden sm:inline">Turn on sound</span>
+          </button>
+        )}
+
+        <ThemeToggle />
+      </div>
     </header>
   )
 }
@@ -79,7 +92,7 @@ const LOOK: Record<Status, { label: string; className: string; live: boolean }> 
 }
 
 /**
- * Not a live region. The caption below is already announcing the lesson
+ * Not a live region. The stream is already announcing the lesson
  * sentence by sentence, and a second region competing with it turns both into
  * noise — so this is read on demand, like any other label.
  */

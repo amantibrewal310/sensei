@@ -69,7 +69,7 @@ tokens instead: `--bg-glass`, `--surface-glass`, `--accent-line`, `--warn-line`,
 | ------- | -------------- | ----------------------------------------- |
 | Display | IBM Plex Serif | Page titles, topic, caption, stat figures |
 | UI      | IBM Plex Sans  | Everything else                           |
-| Code    | JetBrains Mono | Code pane, route names, digests, timings  |
+| Code    | JetBrains Mono | Code cards, route names, digests, timings |
 
 Body copy is 14–15px with 1.6 line-height; the caption is 17–18px serif because it is read
 across a room. Nothing below 11px carries meaning that is not repeated elsewhere. `eyebrow`
@@ -78,9 +78,9 @@ across a room. Nothing below 11px carries meaning that is not repeated elsewhere
 ## Space, shape, elevation
 
 Standard density: 8 / 12 / 16 / 24 / 40 / 64. Radii: 8px controls, 10px buttons, 14px cards
-(`--radius-card`), 12px on the board frame, full-round for pills and the ask field. Three
+(`--radius-card`), 12px on the board frame, full-round for pills. Three
 shadows only — `shadow-soft` (the board), `shadow-raised` (the topic box, cards that
-invite a click), `shadow-float` (the outline drawer).
+invite a click), `shadow-float` (the page list that drops from the header).
 
 ## Components
 
@@ -112,8 +112,9 @@ shape before the plan lands). Everything is disabled wholesale under
 - One focus ring, `2px solid var(--accent)` at `2px` offset, never removed.
 - The canvas is `role="img"` with the page title as its label; nothing interactive goes
   inside it.
-- The caption is the only `aria-live` region on the lesson page. The status pill is
-  deliberately not one — two regions announcing over each other is worse than one.
+- One `aria-live` region on the lesson page: a visually hidden line in the stream that holds
+  the sentence being spoken. The stream itself is not live, and neither is the status pill.
+  Two regions announcing over each other is worse than one.
 - Icons are SVG on `currentColor`, `aria-hidden` unless they are a control's only label.
   No emoji anywhere.
 
@@ -125,11 +126,21 @@ shape before the plan lands). Everything is disabled wholesale under
 than submit it. Saved lessons are cards, not a list, and say plainly that a replay costs
 nothing. Three feature notes at the foot, muted.
 
-**`/learn`.** Two headers, and they are different things: the lesson bar (topic, live
-status, sound, theme) and the stage header (page title, kind, counter, prev/next). The
-outline is a spine — number or check, a rail that fills with ink behind taught pages, current
-page marked by a pen-blue bar and a background, not by colour alone. Below `lg` the outline
-becomes a drawer and the code pane stacks under the board.
+**`/learn`.** The board, and the teacher's side of the desk. Worked out on the "Player —
+scratchpad" page in Paper, where two other layouts lost; the notes there say why.
+
+- **Header.** Topic on the left, status on the right, and the page navigator centred: one
+  box per page (ink once taught, a pen-blue outline for the current one, a grey edge for
+  the rest), then `6/9` and the page title. The title is a button that drops the full list,
+  with a check, a number and the kind on every row, so state is never colour alone.
+- **Stream.** 456px on the right from `lg`, stacked under the board below it. It opens
+  with the page's question, then everything said and shown, oldest at the top, anchored to
+  the bottom like a conversation. The sentence being spoken is 19px serif with a pen-blue
+  bar; the ones before it are 14.5px sans in `--text-muted`. Code is a card in the stream,
+  under the sentence that introduced it. The rail is sized so `MAX_CODE_COLS` fits at 12px
+  mono without a gutter. The learner's questions are cards labelled "You asked". The page
+  before folds to one line that opens to re-read it.
+- **Board.** Everything else. No other column competes with it.
 
 **`/login`, `/pending`.** Centred, one decision each. Pending is drawn as three steps so the
 wait has a shape, and it says the polling interval out loud because nothing will email you.
@@ -141,12 +152,12 @@ survive a half-screened laptop. Spend is a bar per cap with the amber threshold 
 
 ## Deviations from the generated recommendation
 
-| Recommended             | Built                        | Why                                                                                          |
-| ----------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- |
-| Navy `#1E3A5F` + green  | Ink `#1c1c17` + pen blue     | Navy buttons beside a whiteboard read as chrome; ink matches what is drawn on it.            |
-| Outfit / Work Sans      | IBM Plex Serif / Sans / Mono | The product is a teacher and a code pane. Plex covers voice, UI and code in one superfamily. |
-| Hero + Features + CTA   | Composer-first home          | It is a tool behind a sign-in, not a landing page. The first thing on it is the box.         |
-| Stagger-in grid on load | Fade on arrival only         | Content streams here. Animating a list that grows mid-animation fights itself.               |
+| Recommended             | Built                        | Why                                                                                       |
+| ----------------------- | ---------------------------- | ----------------------------------------------------------------------------------------- |
+| Navy `#1E3A5F` + green  | Ink `#1c1c17` + pen blue     | Navy buttons beside a whiteboard read as chrome; ink matches what is drawn on it.         |
+| Outfit / Work Sans      | IBM Plex Serif / Sans / Mono | The product is a teacher and its code. Plex covers voice, UI and code in one superfamily. |
+| Hero + Features + CTA   | Composer-first home          | It is a tool behind a sign-in, not a landing page. The first thing on it is the box.      |
+| Stagger-in grid on load | Fade on arrival only         | Content streams here. Animating a list that grows mid-animation fights itself.            |
 
 ### Where the build departs from Paper
 
