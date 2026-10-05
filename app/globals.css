@@ -5,7 +5,9 @@
 
    The whiteboard is the product, so everything around it is deliberately
    quiet: warm neutrals, one accent, no gradient anywhere near the canvas
-   that would compete with what is being drawn on it.
+   that would compete with what is being drawn on it. Ink is structure;
+   pen blue is "now" — the page being taught, the field being typed in —
+   and goes back to ink the moment it is no longer now.
 
    Both themes live in one `light-dark()` value per token rather than in a
    duplicated dark block, because a token that exists in two places is a
@@ -18,7 +20,7 @@
 
   /* Surfaces */
   --bg: light-dark(#f7f6f2, #121211);
-  --surface: light-dark(#ffffff, #1a1a18);
+  --surface: light-dark(#fcfbf8, #1d1d1b);
   --surface-2: light-dark(#faf9f6, #212120);
   --surface-hover: light-dark(#f3f1ec, #262624);
 
@@ -29,17 +31,21 @@
      lands on, including the hover fill. The first pass at these two was a
      shade prettier and failed at 3.3:1. */
   --text-faint: light-dark(#6f6c64, #918f89);
-  --border: light-dark(#e5e2d9, #2c2c29);
+  --border: light-dark(#e4e2da, #2e2e2b);
   /* The boundary of a control, not a divider: an input sits on the same
      white as the card behind it, so this hairline is the only thing saying
      where the field is — and WCAG 1.4.11 wants 3:1 for exactly that. */
   --border-strong: light-dark(#928e83, #75736d);
 
-  /* One accent: the colour of "the lesson is happening". */
-  --accent: light-dark(#0f766e, #2dd4bf);
-  --accent-hover: light-dark(#115e59, #5eead4);
-  --accent-soft: light-dark(#e6f4f1, #14312e);
-  --on-accent: light-dark(#ffffff, #04211f);
+  /* One accent, the colour of a ballpoint: what is happening this second.
+     A page already taught goes back to ink, so on any screen the blue
+     points at one thing. */
+  --accent: light-dark(#2f5fc4, #6b9cf0);
+  --accent-soft: light-dark(#e3eaf8, #172338);
+
+  /* A teacher's green tick. Feedback only — never decoration. */
+  --correct: light-dark(#2e7048, #5cb47e);
+  --correct-soft: light-dark(#dfeee3, #16291d);
 
   /* Solid ink buttons — the primary action everywhere. */
   --solid: light-dark(#1c1c17, #f0efea);
@@ -60,7 +66,8 @@
   --surface-glass: light-dark(#ffffffe0, #1a1a18e0);
 
   /* Hairlines tinted by their status colour, for the same reason. */
-  --accent-line: light-dark(#0f766e40, #2dd4bf3d);
+  --accent-line: light-dark(#2f5fc440, #6b9cf03d);
+  --correct-line: light-dark(#2e704840, #5cb47e3d);
   --warn-line: light-dark(#a35b0640, #f0b4293d);
   --danger-line: light-dark(#b4231840, #fca5a53d);
 
@@ -100,7 +107,8 @@
   --color-line-strong: var(--border-strong);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
-  --color-on-accent: var(--on-accent);
+  --color-correct: var(--correct);
+  --color-correct-soft: var(--correct-soft);
   --color-solid: var(--solid);
   --color-on-solid: var(--on-solid);
   --color-warn: var(--warn);
@@ -207,14 +215,6 @@
     background: var(--solid-hover);
   }
 
-  .btn-accent {
-    background: var(--accent);
-    color: var(--on-accent);
-  }
-  .btn-accent:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
   .btn-secondary {
     background: var(--surface);
     color: var(--text);
@@ -317,6 +317,11 @@
     color: var(--accent);
     border-color: var(--accent-line);
   }
+  .badge-correct {
+    background: var(--correct-soft);
+    color: var(--correct);
+    border-color: var(--correct-line);
+  }
   .badge-warn {
     background: var(--warn-soft);
     color: var(--warn);
@@ -328,18 +333,20 @@
     border-color: var(--danger-line);
   }
 
-  /* A progress track. Three of these — the outline, and both spend bars —
-     were the same two divs re-typed, down to the 500ms width transition. */
+  /* A progress track. The spend bars were the same two divs re-typed,
+     down to the 500ms width transition. */
   .meter {
     width: 100%;
     overflow: hidden;
     border-radius: 99px;
     background: var(--surface-2);
   }
+  /* Ink, like the player bar it echoes: a bar of what is finished is not
+     "now", so it does not get the pen. */
   .meter-fill {
     height: 100%;
     border-radius: 99px;
-    background: var(--accent);
+    background: var(--solid);
     transition: width 500ms var(--ease);
   }
   .meter-fill-warn {
@@ -383,7 +390,7 @@
   }
 }
 
-/* A planning skeleton, so the outline has a shape before the plan lands. */
+/* A planning skeleton, so the page navigator has a shape before the plan lands. */
 .shimmer {
   background: linear-gradient(
     90deg,

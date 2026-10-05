@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic"
 
 const BADGE: Record<string, string> = {
   pending: "badge badge-warn",
-  approved: "badge badge-accent",
+  approved: "badge badge-correct",
   rejected: "badge badge-neutral",
 }
 
@@ -80,7 +80,7 @@ export default async function Admin() {
                   <span className="truncate text-sm font-medium">{u.name ?? "—"}</span>
                   <span className={BADGE[u.status]}>{u.status}</span>
                   {u.role === "admin" && (
-                    <span className="badge badge-accent">admin</span>
+                    <span className="badge badge-neutral">admin</span>
                   )}
                 </span>
                 <span className="mt-0.5 block truncate text-xs text-faint">

@@ -102,7 +102,7 @@ export default async function Home() {
                     href={`/learn?lesson=${lesson.id}`}
                     className="card group flex h-full items-start gap-3 p-4 transition-colors hover:border-line-strong hover:bg-surface-hover"
                   >
-                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent transition-colors">
+                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted transition-colors group-hover:text-text">
                       <ReplayIcon />
                     </span>
                     <span className="min-w-0 flex-1">
@@ -130,7 +130,7 @@ export default async function Home() {
         <section className="mt-20 grid gap-6 border-t border-line pt-10 sm:grid-cols-3">
           {HOW_IT_WORKS.map(({ icon: Icon, title, body }) => (
             <div key={title}>
-              <Icon className="h-5 w-5 text-accent" />
+              <Icon className="h-5 w-5 text-text" />
               <h3 className="mt-2.5 text-sm font-medium">{title}</h3>
               <p className="mt-1 text-[13px] leading-relaxed text-muted">{body}</p>
             </div>

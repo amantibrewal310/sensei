@@ -4,7 +4,7 @@ import "./globals.css"
 
 // Three faces, one superfamily plus a mono. Plex Serif carries the lesson's
 // own voice — headings and the spoken caption — Plex Sans is the app talking
-// about the lesson, and JetBrains Mono is the code pane, where a zero has to
+// about the lesson, and JetBrains Mono is the code in the stream, where a zero has to
 // be distinguishable from an O at 13px.
 const sans = IBM_Plex_Sans({
   variable: "--font-plex-sans",
