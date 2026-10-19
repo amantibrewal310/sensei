@@ -25,7 +25,7 @@ export default async function Pending() {
       </div>
 
       <div className="w-full max-w-md text-center">
-        <LogoMark className="mx-auto h-10 w-10" />
+        <LogoMark drawn className="mx-auto h-8" />
 
         <h1 className="mt-5 font-serif text-2xl font-medium tracking-tight">
           {rejected ? "Not approved" : "Waiting for approval"}
@@ -85,7 +85,7 @@ function Step({
       <span
         className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border ${
           done
-            ? "border-accent bg-accent text-on-accent"
+            ? "border-solid bg-solid text-on-solid"
             : current
               ? "border-warn text-warn"
               : "border-line-strong text-faint"

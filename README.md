@@ -68,8 +68,15 @@ follows: it zooms to the panel being drawn into and pulls back to the whole page
 **Code is not on the whiteboard.** It used to be drawn as one text shape per line inside a frame,
 which meant it inherited every constraint the canvas has and deserved none of them — it couldn't be
 selected or copied, couldn't scroll, and competed for panel width with the diagram explaining it. It
-now renders as HTML in a pane beside the board ([`components/CodePane.tsx`](components/CodePane.tsx)),
-typed out a line at a time, and comes straight from the teacher rather than through a second model.
+now renders as HTML ([`components/CodeCard.tsx`](components/CodeCard.tsx)), typed out a line at a
+time, and comes straight from the teacher rather than through a second model.
+
+**The lesson is a stream beside the board.** Everything the teacher says and shows lands in one
+column, in the order it happened ([`components/LessonStream.tsx`](components/LessonStream.tsx)). The
+sentence being spoken is the largest text there, in the serif, and the earlier ones recede. A
+snippet sits directly under the sentence that introduced it, and a question you ask stays in the
+stream where you asked it. The outline is a row of boxes in the header, one per page, and the
+current title opens the full list.
 
 ## Architecture
 
@@ -181,10 +188,9 @@ page taught.
 
 ## Not done yet
 
-- **Mobile is usable, not comfortable.** The three panes collapse below `lg` — the outline becomes a
-  drawer, the code pane stacks under the board — so nothing is unreachable on a phone. But a
-  whiteboard you watch being drawn wants the room, and at 390px it does not get it. The collapse is
-  by construction rather than by measurement — it has not been checked on a handset.
+- **Mobile is usable, not comfortable.** Below `lg` the stream stacks under the board, at up to
+  42% of the screen. That has been checked at 390px in a browser, but not on a handset, and a
+  whiteboard you watch being drawn wants more room than a phone gives it.
 - **Replay re-synthesises narration.** Everything Anthropic produced is stored and read back, so a
   replay makes **no** call to Anthropic — but the voice is generated again, at about $0.08 a lesson.
   Storing audio is a different problem and is not solved here.

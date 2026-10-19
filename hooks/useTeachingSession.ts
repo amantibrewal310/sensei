@@ -21,6 +21,18 @@ export type Status = "idle" | "planning" | "teaching" | "done"
 export type Msg = { role: "user" | "assistant"; text: string }
 
 /**
+ * One thing that happened on a page, in the order it happened: a sentence the
+ * teacher said, a snippet it showed, or a question the learner asked. Kept as
+ * one list rather than a list of sentences and a list of snippets, because the
+ * stream shows code under the sentence that introduced it and two lists cannot
+ * say which came first.
+ */
+export type Entry =
+  | { kind: "say"; id: string; text: string }
+  | { kind: "ask"; id: string; text: string }
+  | ({ kind: "code" } & Snippet)
+
+/**
  * Adds a message to the transcript, dropping the oldest to stay inside
  * `TRANSCRIPT_WINDOW`.
  *
@@ -112,10 +124,6 @@ const PlanResponse = z.object({ pages: z.array(PageSchema) })
 
 const LESSON_DONE = "That's the lesson. Pick any page from the outline to revisit it."
 
-// One shared empty list, so a page with no code yet does not hand the UI a new
-// array identity on every render.
-const NO_CODE: Snippet[] = []
-
 /**
  * One page's canvas: the board it was given, what has been drawn into each
  * panel, and the layout those two produce. The blocks are the source of truth —
@@ -131,19 +139,19 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   const [pages, setPages] = useState<Page[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [taught, setTaught] = useState<string[]>([])
-  // Snippets per page, so navigating back to "Token bucket" brings its code
-  // with it exactly as its diagram comes back.
-  const [code, setCode] = useState<Record<string, Snippet[]>>({})
+  // Per page, so navigating back to "Token bucket" brings back what was said
+  // on it exactly as its diagram comes back.
+  const [stream, setStream] = useState<Record<string, Entry[]>>({})
+  // The sentence being spoken right now, by entry id. Null between pages and
+  // after an interruption, so nothing on screen claims to be live when the
+  // teacher has stopped.
+  const [live, setLive] = useState<string | null>(null)
   const [status, setStatus] = useState<Status>("idle")
   // Mirrors `topicRef` into render. A replay learns its topic from the stored
   // row rather than from the URL, and the lesson bar has nothing else to name
   // it by — it showed an ellipsis for the whole replay.
   const [topic, setTopic] = useState("")
   const [caption, setCaption] = useState("")
-  // The caption is replaced by the next sentence, so on its own it is a lesson
-  // you cannot look back at. This is the same text kept, and it is what makes
-  // the spoken half of the lesson readable rather than merely audible.
-  const [spoken, setSpoken] = useState<string[]>([])
   // Separate from `caption`, which is the lesson talking. This is the app
   // admitting something went wrong, and it must not be overwritten by the next
   // sentence the teacher happens to emit.
@@ -162,6 +170,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
   const transcriptRef = useRef<Msg[]>([])
 
   const genRef = useRef(0)
+  const entryRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
 
   // The lesson being written down as it is taught. `beatsRef` accumulates the
@@ -351,28 +360,51 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
     [applyBlock, canvas],
   )
 
-  /** Types a snippet into the pane a line at a time. */
+  // How entries are keyed by page is stated once, here, rather than being
+  // restated by every updater that touches the map.
+  const patchStream = useCallback(
+    (pageId: string, fn: (list: Entry[]) => Entry[]) =>
+      setStream((all) => ({ ...all, [pageId]: fn(all[pageId] ?? []) })),
+    [],
+  )
+
+  /** Adds a sentence or a question to a page's stream, and answers its id. */
+  const note = useCallback(
+    (pageId: string, kind: "say" | "ask", text: string): string => {
+      const id = `${pageId}~${kind}${++entryRef.current}`
+      patchStream(pageId, (list) => [...list, { kind, id, text }])
+      return id
+    },
+    [patchStream],
+  )
+
+  /** Types a snippet into the stream a line at a time. */
   const showCode = useCallback(
     async (gen: number, page: Page, label: string, lines: string[]) => {
-      const id = `${page.id}~${label}`
-      // How snippets are keyed by page is stated once, here, rather than being
-      // restated by every updater that touches the map.
-      const patch = (fn: (list: Snippet[]) => Snippet[]) =>
-        setCode((all) => ({ ...all, [page.id]: fn(all[page.id] ?? []) }))
+      // Its own namespace, so a snippet labelled "say3" cannot collide with
+      // the third sentence's id.
+      const id = `${page.id}~code~${label}`
+      const patch = (fn: (list: Entry[]) => Entry[]) => patchStream(page.id, fn)
 
-      // Keyed by label so re-teaching a page after a question replaces its
-      // snippet rather than stacking a second copy underneath.
-      patch((list) => [...list.filter((s) => s.id !== id), { id, label, lines: [] }])
+      // Keyed by label so re-teaching a page after a question moves its
+      // snippet down to where it was shown again, rather than stacking a
+      // second copy or leaving it above the question that prompted it.
+      patch((list) => [
+        ...list.filter((e) => e.id !== id),
+        { kind: "code", id, label, lines: [] },
+      ])
 
       for (const line of lines) {
         if (gen !== genRef.current) return
         patch((list) =>
-          list.map((s) => (s.id === id ? { ...s, lines: [...s.lines, line] } : s)),
+          list.map((e) =>
+            e.kind === "code" && e.id === id ? { ...e, lines: [...e.lines, line] } : e,
+          ),
         )
         await wait(CODE_LINE_MS)
       }
     },
-    [],
+    [patchStream],
   )
 
   /**
@@ -382,12 +414,12 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
    * and replay, so the pacing rules cannot drift between them.
    */
   const speakBeat = useCallback(
-    async (gen: number, text: string) => {
+    async (gen: number, page: Page, text: string) => {
       await speakingRef.current
       if (gen !== genRef.current) return
 
       setCaption(text)
-      setSpoken((lines) => [...lines, text].slice(-TRANSCRIPT_WINDOW))
+      setLive(note(page.id, "say", text))
       speakingRef.current = narrator.speak(text).then(() => {
         // With audio blocked there is nothing to pace the lesson, so fall
         // back to holding the caption long enough to read.
@@ -398,7 +430,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       })
       await wait(LEAD_MS)
     },
-    [narrator],
+    [narrator, note],
   )
 
   /**
@@ -411,6 +443,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
     async (gen: number, page: Page): Promise<boolean> => {
       await speakingRef.current
       if (gen !== genRef.current) return false
+      setLive(null)
       setTaught((t) => (t.includes(page.id) ? t : [...t, page.id]))
       canvas.current?.fitAll()
       return true
@@ -505,7 +538,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
         if (a.type === "speak") {
           beatsRef.current.push({ kind: "speak", text: a.text })
           remember(transcriptRef.current, { role: "assistant", text: a.text })
-          await speakBeat(gen, a.text)
+          await speakBeat(gen, page, a.text)
         } else if (a.type === "code") {
           beatsRef.current.push({ kind: "code", label: a.label, lines: a.lines })
           await showCode(gen, page, a.label, a.lines)
@@ -580,8 +613,8 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       setPages(pages)
       setIndex(0)
       setTaught([])
-      setCode({})
-      setSpoken([])
+      setStream({})
+      setLive(null)
     },
     [setIndex],
   )
@@ -646,6 +679,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
     abortRef.current?.abort()
     narrator.stop()
     speakingRef.current = Promise.resolve()
+    setLive(null)
   }, [narrator])
 
   /** Cancels whatever is in flight and starts a new run from `indexRef`. */
@@ -684,7 +718,7 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
         if (gen !== genRef.current) return
 
         if (beat.kind === "speak") {
-          await speakBeat(gen, beat.text)
+          await speakBeat(gen, page, beat.text)
         } else if (beat.kind === "code") {
           await showCode(gen, page, beat.label, beat.lines)
         } else if (beat.kind === "panel") {
@@ -831,9 +865,11 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
       // carrying on talking over a question is the one thing a tutor must not
       // do — and re-runs this page with the question in the transcript.
       remember(transcriptRef.current, { role: "user", text })
+      const page = pagesRef.current[indexRef.current]
+      if (page) note(page.id, "ask", text)
       void begin()
     },
-    [begin],
+    [begin, note],
   )
 
   /** Only ever needed if the browser blocked autoplay — see `Narrator.blocked`. */
@@ -853,10 +889,10 @@ export function useTeachingSession(canvas: { current: CanvasApi | null }) {
     taught,
     status,
     caption,
-    spoken,
+    stream,
+    live,
     error,
     soundBlocked,
     enableSound,
-    code: code[pages[currentIndex]?.id ?? ""] ?? NO_CODE,
   }
 }

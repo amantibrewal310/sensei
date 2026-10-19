@@ -12,7 +12,7 @@ function AskFormInner({ onAsk }: { onAsk: (text: string) => void }) {
 
   return (
     <form
-      className="shrink-0 border-t border-line bg-surface px-4 py-3 sm:px-6"
+      className="shrink-0 px-4 pt-3 pb-3 lg:px-5 lg:pb-4"
       onSubmit={(e) => {
         e.preventDefault()
         if (ask.trim()) {
@@ -21,7 +21,7 @@ function AskFormInner({ onAsk }: { onAsk: (text: string) => void }) {
         }
       }}
     >
-      <div className="mx-auto flex max-w-3xl items-center gap-2">
+      <div className="flex items-center gap-2">
         {/* A placeholder is not a label: it disappears the moment anyone
             types, and it is not what a screen reader announces the field by. */}
         <label className="sr-only" htmlFor="ask">
@@ -30,23 +30,23 @@ function AskFormInner({ onAsk }: { onAsk: (text: string) => void }) {
         <input
           id="ask"
           autoComplete="off"
-          className="field flex-1 rounded-full"
-          placeholder="Ask a question…"
+          className="field flex-1"
+          placeholder="Interrupt with a question…"
           value={ask}
           onChange={(e) => setAsk(e.target.value)}
           aria-describedby="ask-hint"
         />
-        <button className="btn btn-primary rounded-full" disabled={!ask.trim()}>
-          Ask
+        <button
+          className="btn btn-primary btn-icon"
+          disabled={!ask.trim()}
+          aria-label="Ask"
+        >
           <ArrowRightIcon />
         </button>
       </div>
       {/* Said once, quietly, because it is surprising the first time: there is
           no microphone and no barge-in — typing is the interruption. */}
-      <p
-        id="ask-hint"
-        className="mx-auto mt-1.5 max-w-3xl text-center text-[11px] text-faint"
-      >
+      <p id="ask-hint" className="mt-1.5 text-[11px] text-faint">
         Asking cuts the narration off and answers on this page.
       </p>
     </form>

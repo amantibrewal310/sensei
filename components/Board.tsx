@@ -67,9 +67,10 @@ export function Board({ api }: { api: Ref<CanvasApi> }) {
   const editorRef = useRef<Editor | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   // Whatever the camera was last asked to show, so it can be re-shown when the
-  // canvas changes size. The canvas is narrowed by the code pane appearing —
-  // which is not a window resize, so watching the window left the board sitting
-  // half underneath it.
+  // canvas changes size. A code pane opening beside the board once narrowed it
+  // without resizing the window, and watching the window left the board sitting
+  // half underneath it. Below `lg` the stream growing under the board does the
+  // same thing now.
   const lastViewRef = useRef<(() => void) | null>(null)
 
   // NOTE: the camera is deliberately never locked. Locking it immediately after
@@ -295,8 +296,8 @@ export function Board({ api }: { api: Ref<CanvasApi> }) {
         licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
         onMount={(editor) => {
           editorRef.current = editor
-          // The canvas is resized by the code pane appearing beside it, not
-          // only by the window changing — so the element is what is watched.
+          // The canvas is resized by the stream growing under it, not only
+          // by the window changing — so the element is what is watched.
           // tldraw needs a frame to take in its own new size before the camera
           // is recomputed against it.
           let queued = 0

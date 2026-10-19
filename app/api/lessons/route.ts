@@ -62,7 +62,7 @@ export async function POST(req: Request) {
   }
 
   // Re-teaching a page after a question replaces it rather than stacking a
-  // second copy — the same rule the code pane follows for snippets.
+  // second copy — the same rule the stream follows for snippets.
   await db
     .insert(lessonPages)
     .values({ lessonId: id, idx, page: pages[idx], board, beats })

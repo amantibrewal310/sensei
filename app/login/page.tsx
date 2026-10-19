@@ -35,7 +35,7 @@ export default async function Login({
 
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center text-center">
-          <LogoMark className="h-11 w-11" />
+          <LogoMark drawn className="h-9" />
           <h1 className="mt-4 font-serif text-2xl font-medium tracking-tight">
             Sign in to <Wordmark className="text-2xl" />
           </h1>
